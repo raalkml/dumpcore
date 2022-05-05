@@ -21,8 +21,19 @@
 # accessible in both initial and target mount namespaces. Which might be
 # a wrong thing to rely on...
 
+test -f /etc/dumpcore/config && . /etc/dumpcore/config
+: "${CORE_USER:=root}"
+: "${CORE_GROUP:=root}"
+: "${CORE_DIR:=/var/log/dumpcore}"
+: "${CORE_AUTOCLEAN:=Y}"
+: "${GDB:=/usr/bin/gdb}"
+
 if [ $# = 1 -a "${1%=*}" = '--install' ]; then
     arg=$(realpath "$0")
+    if ! cd "$CORE_DIR" 2>/dev/null; then
+	mkdir -p "$CORE_DIR" || echo >&2 'Crash reports may be lost!'
+	chown "$CORE_USER:$CORE_GROUP" "$CORE_DIR"
+    fi
     echo "|$arg %P %u %I %s %E" >/proc/sys/kernel/core_pattern
     arg="${1#--install}"
     arg="${arg#=}"
@@ -34,12 +45,6 @@ if [ $# = 1 -a "${1%=*}" = '--install' ]; then
     cat /proc/sys/kernel/core_pipe_limit
     exit
 fi
-test -f /etc/dumpcore/config && . /etc/dumpcore/config
-: "${CORE_USER:=root}"
-: "${CORE_GROUP:=root}"
-: "${CORE_DIR:=/var/log/dumpcore}"
-: "${CORE_AUTOCLEAN:=Y}"
-: "${GDB:=/usr/bin/gdb}"
 
 pid="$1"
 exepath="$5"

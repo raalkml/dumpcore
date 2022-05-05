@@ -36,6 +36,7 @@
 #include <sched.h>
 #include <sys/vfs.h>
 #include <sys/types.h>
+#include <sys/stat.h>
 #include <sys/wait.h>
 #include <dirent.h>
 #include <grp.h>
@@ -49,6 +50,12 @@ static char DEFAULT_CORE_USER[] = "root";
 static char DEFAULT_CORE_GROUP[] = "root";
 static char DEFAULT_CORE_AUTOCLEAN[] = "Y"; /* remove core file after analysis */
 static char DEFAULT_GDB[] = "/usr/bin/gdb";
+
+static char *CORE_DIR = DEFAULT_CORE_DIR;
+static char *CORE_USER = DEFAULT_CORE_USER;
+static char *CORE_GROUP = DEFAULT_CORE_GROUP;
+static char *CORE_AUTOCLEAN = DEFAULT_CORE_AUTOCLEAN;
+static char *GDB = DEFAULT_GDB;
 
 static char STR_ERROR[] = "*error*";
 
@@ -156,6 +163,37 @@ static void replace_inplace(char *s, char a, char b)
     }
 }
 
+static int mkdir_p(const char *path, mode_t mode)
+{
+        int ret = mkdir(path, mode);
+
+        if (ret == 0 || EEXIST == errno)
+                return 0;
+        if (ENOENT == errno) {
+                char *dir = strdup(path);
+                char *end = dir + strlen(dir);
+                char *slash = dir;
+
+                while (slash < end) {
+                        char *s = strchr(slash, '/');
+                        if (!s)
+                                s = slash + strlen(slash);
+                        if (s > slash) {
+                                *s = '\0';
+                                ret = mkdir(dir, mode);
+                                *s = '/';
+                                if (ret == -1 && EEXIST != errno)
+                                        break;
+                        }
+                        slash = s + !!*s;
+                }
+                free(dir);
+        }
+        return ret;
+}
+
+static void load_config(const char *config_file);
+
 static int do_install(char *argv0, const char *arg)
 {
     // <pid> <target-pidns-pid> <uid> <signal> <exe-path-/-!>
@@ -175,6 +213,41 @@ static int do_install(char *argv0, const char *arg)
     }
     if (exe != argv0)
         free(exe);
+    int ret = 0;
+    load_config(DUMPCORE_CONFIG);
+    if (CORE_DIR && *CORE_DIR) {
+        if (chdir(CORE_DIR) != 0) {
+            int fail = 0;
+            if (ENOENT == errno) {
+                if (mkdir_p(CORE_DIR, 0750) == -1 && EEXIST != errno) {
+                    fprintf(stderr, "mkdir %s: %m\n", CORE_DIR);
+                    ++fail;
+                }
+            } else {
+                fprintf(stderr, "%s: %m\n", CORE_DIR);
+                ++fail;
+            }
+            if (fail) {
+                fprintf(stderr, "The crash reports may be lost!\n");
+                ret |= 2;
+            } else {
+                struct passwd *pw = getpwnam(CORE_USER);
+                struct group *gr = getgrnam(CORE_GROUP);
+                uid_t uid = -1;
+                gid_t gid = -1;
+
+                if (pw)
+                    uid = pw->pw_uid;
+                if (gr)
+                    gid = gr->gr_gid;
+                if (gid == (gid_t)-1 && pw)
+                    gid = pw->pw_gid;
+                if (chown(CORE_DIR, uid, gid) == -1)
+                    fprintf(stderr, "chown %s[%d]:%s[%d] %s: %m\n",
+                            CORE_USER, (int)uid, CORE_GROUP, (int)gid, CORE_DIR);
+            }
+        }
+    }
     // man 5 core
     // XXX kernels before 5.3 split the command into argument after
     // XXX expanding the pattern, breaking names with spaces. Especially
@@ -185,11 +258,10 @@ static int do_install(char *argv0, const char *arg)
     strcpy(s, "|");
     strcat(s, absexe);
     strcat(s, pattern);
-    int ret = 0;
     printf("'|%s%s' >%s\n", absexe, pattern, core_pattern);
     if (write_file(core_pattern, s, -1) < 0) {
         fprintf(stderr, "%s: %m\n", core_pattern);
-        ret = 1;
+        ret |= 1;
     }
     if (!*arg)
         arg = "100";
@@ -199,17 +271,11 @@ static int do_install(char *argv0, const char *arg)
         printf("'%s' >%s\n", arg, core_pipe_limit);
         if (write_file(core_pipe_limit, arg, -1) < 0) {
             fprintf(stderr, "%s: %m\n", core_pipe_limit);
-            ret = 1;
+            ret |= 1;
         }
     }
     return ret;
 }
-
-static char *CORE_DIR = DEFAULT_CORE_DIR;
-static char *CORE_USER = DEFAULT_CORE_USER;
-static char *CORE_GROUP = DEFAULT_CORE_GROUP;
-static char *CORE_AUTOCLEAN = DEFAULT_CORE_AUTOCLEAN;
-static char *GDB = DEFAULT_GDB;
 
 struct proc_file {
     int fd, err;
