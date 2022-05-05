@@ -1,0 +1,5 @@
+CORE_DIR=/media/large-fs/coredumps
+CORE_USER=root
+CORE_GROUP=debug
+GDB=/usr/bin/gdb
+CORE_AUTOCLEAN=NO
