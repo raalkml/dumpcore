@@ -28,11 +28,68 @@ pub fn fdput_bytes(fd: i32, arg: &[u8]) {
     }
 }
 
+pub trait FdPuts { fn fdputs(self, fd: i32); }
+
+impl FdPuts for &'static str {
+    fn fdputs(self, fd: i32) { fdput_bytes(fd, self.as_bytes()) }
+}
+impl FdPuts for &[u8] {
+    fn fdputs(self, fd: i32) { fdput_bytes(fd, self) }
+}
+impl FdPuts for *const libc::c_char {
+    fn fdputs(self, fd: i32) {
+        if self.is_null() {
+            fdput_bytes(fd, b"(null)")
+        } else {
+            fdput_c_str(fd, self)
+        }
+    }
+}
+impl FdPuts for i32 {
+    fn fdputs(self, fd: i32) {
+        let v;
+        if self < 0 {
+            v = -self;
+            fdput_bytes(fd, b"-");
+        } else {
+            v = self;
+        }
+        fdput_bytes(fd, u32toa(v as u32, &mut [ 0u8; 10 ]))
+    }
+}
+impl FdPuts for u32 {
+    fn fdputs(self, fd: i32) {
+        fdput_bytes(fd, u32toa(self, &mut [ 0u8; 10 ]))
+    }
+}
+impl FdPuts for usize {
+    fn fdputs(self, fd: i32) {
+        let mut buf = [ 0u8; 20 ];
+        static HEX: &[u8; 16] = b"0123456789abcdef";
+        let mut u = self;
+        let mut i = 19;
+        loop {
+            buf[i] = HEX[u & 0x0F];
+            u >>= 4;
+            if u == 0 || i == 0 { break; }
+            i -= 1;
+        }
+        fdput_bytes(fd, b"0x");
+        fdput_bytes(fd, &buf[i..])
+    }
+}
+impl FdPuts for u8 {
+    fn fdputs(self, fd: i32) { fdput_bytes(fd, &[ self ]) }
+}
+impl FdPuts for i8 {
+    fn fdputs(self, fd: i32) { fdput_bytes(fd, &[ self as u8 ]) }
+}
+
 #[macro_export]
 macro_rules! fdprint {
-    ($fd:expr, $s:expr) => ( $crate::misc::fdput_bytes($fd, $s) );
+    ($fd:expr, $s:expr) => ( ($s).fdputs($fd) );
     ($fd:expr, $s:expr, $($es:expr),+) => (
-        $crate::misc::fdput_bytes($fd, $s);
+        ($s).fdputs($fd);
         fdprint!($fd, $($es),+)
     )
 }
@@ -41,10 +98,24 @@ pub fn error(message: &[u8], arg: &[u8]) {
     fdprint!(STDERR_FILENO, message, b": ", arg, b"\n");
 }
 
-pub fn slice_from_c_str<'a, T>(c: *mut T) -> &'a [u8] {
+pub fn slice_from_c_str<'a, T>(c: *const T) -> &'a [u8] {
+    unsafe {
+        slice::from_raw_parts(c as *const u8, libc::strlen(c as *const libc::c_char))
+    }
+}
+
+pub fn slice_from_c_str_mut<'a, T>(c: *mut T) -> &'a [u8] {
     unsafe {
         slice::from_raw_parts_mut(c as *mut u8, libc::strlen(c as *const libc::c_char))
     }
+}
+
+pub fn c_str_of<'a>(s: &'a [u8]) -> *const libc::c_char {
+    s.as_ptr() as *const libc::c_char
+}
+
+pub fn c_str_of_mut<'a>(s: &'a mut [u8]) -> *mut libc::c_char {
+    s.as_mut_ptr() as *mut libc::c_char
 }
 
 pub struct Buffer {
@@ -54,14 +125,29 @@ pub struct Buffer {
 
 impl Buffer {
     pub fn new() -> Self { Buffer { ptr: ptr::null_mut(), len: 0 } }
-    pub fn reserve(&mut self, space: usize) {
-        if self.len < space {
-            let ptr = unsafe { libc::realloc(self.ptr, space) };
-            if ptr.is_null() { panic!("Out of memory") }
-            self.ptr = ptr;
-            self.len = space;
-        }
+    pub fn from_str(src: &'static str) -> Self {
+        let mut b = Buffer { ptr: ptr::null_mut(), len: 0 };
+        b.strcpy(src);
+        b
     }
+    pub fn realloc(&mut self, space: usize) {
+        let ptr = unsafe { libc::realloc(self.ptr, space) };
+        if ptr.is_null() { panic!("Out of memory") }
+        self.ptr = ptr;
+        self.len = space;
+    }
+    pub fn reserve(&mut self, space: usize) {
+        if self.len < space { self.realloc(space); }
+    }
+    pub fn strcpy(&mut self, src: &'static str) {
+        self.reserve(src.len() + 1);
+        let s = unsafe {
+            core::slice::from_raw_parts_mut(self.ptr as *mut u8, self.len)
+        };
+        s[0..src.len()].copy_from_slice(src.as_bytes());
+        s[src.len()] = 0;
+    }
+    pub fn c_str(&self) -> *const libc::c_char { self.ptr as *const libc::c_char }
 }
 impl Drop for Buffer {
     fn drop(&mut self) {
@@ -70,7 +156,11 @@ impl Drop for Buffer {
 }
 impl core::ops::Index<core::ops::RangeFull> for Buffer {
     type Output = [u8];
-    fn index(&self, _index: core::ops::RangeFull) -> &Self::Output { unimplemented!() }
+    fn index(&self, _index: core::ops::RangeFull) -> &Self::Output {
+        unsafe {
+            core::slice::from_raw_parts(self.ptr as *const u8, self.len)
+        }
+    }
 }
 impl core::ops::IndexMut<core::ops::RangeFull> for Buffer {
     fn index_mut(&mut self, _index: core::ops::RangeFull) -> &mut Self::Output {
@@ -80,7 +170,7 @@ impl core::ops::IndexMut<core::ops::RangeFull> for Buffer {
     }
 }
 
-pub fn u32toa(u: u32, s: &mut [u8]) -> &mut [u8] {
+pub fn u64toa(u: u64, s: &mut [u8]) -> &mut [u8] {
     assert!(s.len() >= 10);
     const DEC : &[u8; 10] = b"0123456789";
     let mut pos = s.len();
@@ -96,6 +186,8 @@ pub fn u32toa(u: u32, s: &mut [u8]) -> &mut [u8] {
     unsafe { s.get_unchecked_mut(pos ..) }
 }
 
+pub fn u32toa(u: u32, s: &mut [u8]) -> &mut [u8] { u64toa(u as u64, s) }
+
 pub fn c_char_to_long(p: *const libc::c_char, base: libc::c_int) -> libc::c_long {
     if p.is_null() { 0 }
     else {
@@ -104,4 +196,5 @@ pub fn c_char_to_long(p: *const libc::c_char, base: libc::c_int) -> libc::c_long
         }
     }
 }
+
 

@@ -1,5 +1,5 @@
 #![no_main]
-#![allow(unused_imports)]
+//#![allow(unused_imports)]
 #![cfg_attr(not(test), no_std)]
 #![cfg_attr(test, allow(unused))]
 #![reexport_test_harness_main = "unit_test_main"]
@@ -7,57 +7,277 @@
 extern crate core;
 
 extern crate libc;
-use libc::{STDOUT_FILENO, STDERR_FILENO};
-use core::{mem, slice, ptr};
+use libc::{STDIN_FILENO, STDOUT_FILENO, STDERR_FILENO};
+//use core::{mem, slice, ptr};
 mod misc;
-use misc::{error, slice_from_c_str, u32toa, Buffer};
+mod config;
+
+use misc::*;
+use config::*;
+
+static DUMPCORE_CONFIG: &str = "/etc/dumpcore/config";
 
 fn do_install(_argc: i32, _argv: *const *const i8) ->i32 {
-    error(b"dumpcore", b"--install not implemented");
-    0
+    unimplemented!("dumpcore --install");
+}
+
+struct CorePidFile {
+    fd: libc::c_int,
+    err: libc::c_int,
 }
 
 struct Core {
     pid: libc::pid_t,
     ns_pid: libc::pid_t,
     term_sig: libc::c_int,
+    proc_pid_fd: libc::c_int,
+    proc_pid_ns_mnt: CorePidFile,
+    proc_pid_environ: CorePidFile,
+    exe: *const libc::c_char,
+    proc_exe: Buffer,
 }
 
-fn open_pid(_pid: *const i8) {}
-fn open_pid_files() {}
+/// Duplicates the passed file handle until it is not one of the stdio handles.
+fn no_stdio_fd(fd: libc::c_int) -> libc::c_int {
+    let mut fd = fd;
+    let mut close_fd : [ libc::c_int; 3 ] = [ -1, -1, -1 ];
+    let mut close_pos = 0;
+    for t in [ STDIN_FILENO, STDOUT_FILENO, STDERR_FILENO ] {
+        if fd == t {
+            close_fd[close_pos] = fd;
+            close_pos += 1;
+            fd = unsafe { libc::fcntl(fd, libc::F_DUPFD_CLOEXEC, 1) };
+        }
+    }
+    for t in close_fd {
+        if t != -1 { unsafe { libc::close(t) }; }
+    }
+    fd
+}
+
+fn redirect_fd(dst: libc::c_int, prefix: &[u8], suffix: &'static str) -> Buffer {
+    assert!(prefix.len() > 0);
+    let mut name = Buffer::new();
+    name.reserve(prefix.len() + suffix.len() + 1);
+    let pfxlen = prefix.len() - 1;
+    name[..][..pfxlen].copy_from_slice(&prefix[..pfxlen]);
+    name[..][pfxlen..pfxlen + suffix.len()].copy_from_slice(suffix.as_bytes());
+    name[..][pfxlen + suffix.len()] = 0;
+    let fd = unsafe {
+        libc::open(c_str_of(&name[..]), libc::O_WRONLY | libc::O_APPEND | libc::O_CREAT, 0o640)
+    };
+    if fd == -1 { return Buffer::new(); }
+    unsafe {
+        libc::dup2(fd, dst);
+        if fd != dst { libc::close(fd); }
+    }
+    name
+}
+
+impl Core {
+    fn open_pid(&mut self, pid_arg: *const i8) {
+        let pid_arg = slice_from_c_str(pid_arg);
+        let mut path = [0u8; 6 + 10 + 1];
+        path[..6].copy_from_slice(b"/proc/");
+        // FIXME panics if pid_arg is too long
+        path[6..6 + pid_arg.len()].copy_from_slice(pid_arg);
+        path[6 + pid_arg.len()] = 0;
+        unsafe {
+            // avoid using the stdin/stdout/stderr file handles
+            self.proc_pid_fd = no_stdio_fd(libc::open(c_str_of(&path), libc::O_PATH | libc::O_CLOEXEC, 0));
+        }
+        fdprint!(STDOUT_FILENO, b"proc_pid_fd: ", path, b" -> ", self.proc_pid_fd, b"\n");
+    }
+
+    fn open_pid_files(&mut self) {
+        self.proc_pid_ns_mnt.fd = no_stdio_fd(unsafe {
+            libc::openat(self.proc_pid_fd, libc_str!("ns/mnt"),
+                         libc::O_RDONLY | libc::O_CLOEXEC)
+        });
+        self.proc_pid_ns_mnt.err = if self.proc_pid_ns_mnt.fd == -1 {
+            unsafe { *libc::__errno_location() }
+        } else { 0 };
+        self.proc_pid_environ.fd = no_stdio_fd(unsafe {
+            libc::openat(self.proc_pid_fd, libc_str!("environ"),
+                         libc::O_RDONLY | libc::O_CLOEXEC)
+        });
+        self.proc_pid_environ.err = if self.proc_pid_ns_mnt.fd == -1 {
+            unsafe { *libc::__errno_location() }
+        } else { 0 };
+    }
+
+}
+
+impl Drop for Core {
+    fn drop(&mut self) {
+        unsafe {
+            if self.proc_pid_fd != -1 { libc::close(self.proc_pid_fd); }
+            if self.proc_pid_environ.fd != -1 { libc::close(self.proc_pid_environ.fd); }
+            if self.proc_pid_ns_mnt.fd != -1 { libc::close(self.proc_pid_ns_mnt.fd); }
+        }
+    }
+}
+
+fn read_symlink(dirfd: libc::c_int, name: *const libc::c_char) -> Buffer {
+    use core::ops::IndexMut;
+    let mut b = Buffer::new();
+    let mut size = libc::PATH_MAX as usize / 4;
+    let ret = loop {
+        b.reserve(size);
+        let s = b.index_mut(..);
+        let ret = unsafe { libc::readlinkat(dirfd, name, c_str_of_mut(s), s.len()) };
+        if ret == -1 { return Buffer::new(); }
+        if ret as usize == s.len() {
+            size += libc::PATH_MAX as usize / 8;
+        } else {
+            break ret as usize;
+        }
+    };
+    b[..][ret] = 0;
+    b.realloc(ret + 1);
+    b
+}
+
+fn dump_proc(core_pid: libc::pid_t, proc_pid_fd: libc::c_int) {
+    fdprint!(STDOUT_FILENO, "PROC-", core_pid, ":\n");
+    let proc_root = read_symlink(proc_pid_fd, libc_str!("root"));
+    fdprint!(STDOUT_FILENO, " root -> ", &proc_root[..], "\n");
+    let proc_cwd = read_symlink(proc_pid_fd, libc_str!("cwd"));
+    fdprint!(STDOUT_FILENO, " cwd -> ", &proc_cwd[..], "\n");
+    let dfd = unsafe {
+        libc::openat(proc_pid_fd, libc_str!("fd"), libc::O_DIRECTORY | libc::O_RDONLY)
+    };
+    if dfd != -1 {
+        let dir = unsafe { libc::fdopendir(dfd) };
+        if !dir.is_null() {
+            loop {
+                let ent = unsafe { libc::readdir(dir) };
+                if ent.is_null() { break; }
+                let ent = unsafe { ent.read() };
+                if ent.d_name[0] == '.' as i8 { continue; }
+                let t = read_symlink(dfd, ent.d_name.as_ptr());
+                fdprint!(STDOUT_FILENO, " fd/", ent.d_name.as_ptr(), " -> ", t.c_str(), "\n");
+            }
+        }
+        unsafe { libc::closedir(dir) };
+    }
+
+    fdprint!(STDOUT_FILENO, "PROC-", core_pid,"_END\n\n");
+}
+
+fn dump_proc_environ(_core_pid: libc::pid_t, _proc_pid_environ_fd: libc::c_int) {
+    fdprint!(STDOUT_FILENO, "ENVIRONMENT:\n");
+    fdprint!(STDOUT_FILENO, "ENVIRONMENT_END\n\n");
+}
 
 #[unsafe(no_mangle)]
 pub extern "C" fn main(argc: i32, argv: *const *const i8) -> i32 {
 #[cfg(test)]
     { unit_test_main(); return 0 }
 
-    if argc == 2 && slice_from_c_str(unsafe {*argv.add(1) as *mut u8}) == b"--install" {
+    if argc == 2 && slice_from_c_str(unsafe {*argv.add(1)}) == b"--install" {
         return do_install(argc, argv);
     }
     let mut core = Core {
-        pid: libc::pid_t::from(-1),
-        ns_pid: libc::pid_t::from(-1),
-        term_sig: libc::c_int::from(-1),
+        pid: -1,
+        ns_pid: -1,
+        term_sig: -1,
+        proc_pid_fd: -1,
+        proc_pid_ns_mnt: CorePidFile { fd: -1, err: -1 },
+        proc_pid_environ: CorePidFile { fd: -1, err: -1 },
+        exe: core::ptr::null(),
+        proc_exe: Buffer::new(),
     };
     if argc > 1 {
-        let pid = unsafe {*argv.add(1) as *const libc::c_char};
-        open_pid(pid);
-        open_pid_files();
+        let pid = unsafe {*argv.add(1)};
+        core.open_pid(pid);
+        core.open_pid_files();
         core.pid = misc::c_char_to_long(pid, 10) as libc::pid_t;
     }
     if argc > 2 {
-        let ns_pid = unsafe {*argv.add(2) as *const libc::c_char};
+        let ns_pid = unsafe {*argv.add(2)};
         core.ns_pid = misc::c_char_to_long(ns_pid, 10) as libc::pid_t;
     }
     if argc > 3 {
-        let ns_pid = unsafe {*argv.add(3) as *const libc::c_char};
+        let ns_pid = unsafe {*argv.add(3)};
         core.term_sig = misc::c_char_to_long(ns_pid, 10) as libc::c_int;
     }
-    let mut buf = [ 0u8; 20 ];
-    fdprint!(STDOUT_FILENO, b"core pid: ", u32toa(core.pid as u32, &mut buf), b"\n");
-    fdprint!(STDOUT_FILENO, b"core ns pid: ", u32toa(core.ns_pid as u32, &mut buf), b"\n");
-    fdprint!(STDOUT_FILENO, b"core termination signal: ", u32toa(core.term_sig as u32, &mut buf), b"\n");
-    fdprint!(STDOUT_FILENO, b"dumpcore: unimplemented\n");
+    if argc > 4 {
+        core.exe = unsafe {*argv.add(4)};
+    }
+    fdprint!(STDOUT_FILENO, "core pid: ", core.pid, "\n");
+    fdprint!(STDOUT_FILENO, "core ns pid: ", core.ns_pid, "\n");
+    fdprint!(STDOUT_FILENO, "core termination signal: ", core.term_sig, "\n");
+    fdprint!(STDOUT_FILENO, "core exe: ", core.exe, "\n");
+
+    // Compile-time environment variable DUMPCORE_CONFIG can be used
+    // to set the path to the configuration file.
+    let config = load_config(match option_env!("DUMPCORE_CONFIG") {
+        None => DUMPCORE_CONFIG,
+        Some(e) => e,
+    });
+    fdprint!(STDOUT_FILENO, "core dir: ", config.core_dir, "\n");
+    fdprint!(STDOUT_FILENO, "core user: ", config.core_user, "\n");
+    fdprint!(STDOUT_FILENO, "core group: ", config.core_group, "\n");
+    fdprint!(STDOUT_FILENO, "core autoclean: ", if config.core_autoclean { "yes" } else { "no" }, "\n");
+    fdprint!(STDOUT_FILENO, "GDB path: ", config.gdb, "\n");
+
+    let core_file = {
+        let mut b = Buffer::new();
+        static CORE_XXX: &[u8] = b"/core-XXXXXX\0";
+        let core_dir = slice_from_c_str(config.core_dir);
+        b.reserve(core_dir.len() + CORE_XXX.len());
+        b[..][0..core_dir.len()].copy_from_slice(core_dir);
+        b[..][core_dir.len()..].copy_from_slice(CORE_XXX);
+        b
+    };
+    let core_fd = no_stdio_fd(unsafe { libc::mkstemp(core_file[..].as_ptr() as *mut libc::c_char) });
+    fdprint!(STDOUT_FILENO, "tmp core file: ", core_file[..],
+             if core_fd == -1 { " (open failed)\n" } else { "\n" });
+
+    let tty = unsafe { libc::open(libc_str!("/dev/tty"), libc::O_WRONLY, 0) };
+
+    let dump_errors = redirect_fd(STDERR_FILENO, &core_file[..], ".log");
+    let dump_txt = redirect_fd(STDOUT_FILENO, &core_file[..], ".txt");
+    fdprint!(STDERR_FILENO, "dumpcore started\n");
+    fdprint!(tty, "err file: ", dump_errors.c_str(), "\n");
+    fdprint!(tty, "out file: ", dump_txt.c_str(), "\n");
+
+    if core.proc_pid_fd != -1 {
+        core.proc_exe = read_symlink(core.proc_pid_fd, libc_str!("exe"));
+        if core.proc_exe[..].len() == 0 {
+            let errno = unsafe { *libc::__errno_location() };
+            let error = unsafe { libc::strerror(errno) };
+            fdprint!(tty, "/proc/<pid>/exe: readlinkat failed (", error, ")\n");
+        } else {
+            fdprint!(tty, "/proc/<pid>/exe: ", &core.proc_exe[..], "\n");
+        }
+    }
+
+    fdprint!(STDOUT_FILENO, "CORE-OF: ",
+             if core.proc_exe[..].len() > 0 {
+                 c_str_of(&core.proc_exe[..])
+             } else {
+                 core.exe
+             }, "\n\n");
+    fdprint!(STDOUT_FILENO, "DUMPCORE_ARGS:\n");
+    for i in 1usize .. argc as usize {
+        fdprint!(STDOUT_FILENO, " ", unsafe {*argv.add(i)}, "\n");
+    }
+    fdprint!(STDOUT_FILENO, "DUMPCORE_ARGS_END\n\n");
+
+    if core.pid != -1 {
+        dump_proc(core.pid, core.proc_pid_fd);
+        dump_proc_environ(core.pid, core.proc_pid_environ.fd);
+        // trace_pid();
+    }
+    // copy_core(core_fd);
+    // unsafe { libc::close(core_fd); }
+
+    if config.core_autoclean {
+        fdprint!(STDOUT_FILENO, "CORE-AUTOCLEAN: Y\n");
+    }
+    fdprint!(STDOUT_FILENO, "end\n");
     0
 }
 
@@ -65,11 +285,11 @@ pub extern "C" fn main(argc: i32, argv: *const *const i8) -> i32 {
 #[panic_handler]
 fn my_panic(info: &core::panic::PanicInfo) -> ! {
     fdprint!(STDERR_FILENO, b"=== Panic ===\n");
+    if let Some(msg) = info.message().as_str() {
+        fdprint!(STDERR_FILENO, msg, b"\n");
+    }
     if let Some(loc) = info.location() {
-        let mut line = [ 0u8; 10 ];
-        fdprint!(STDERR_FILENO,
-            loc.file().as_bytes(),
-            b":", u32toa(loc.line(), &mut line), b"\n");
+        fdprint!(STDERR_FILENO, loc.file().as_bytes(), b":", loc.line(), b"\n");
     }
     unsafe { libc::raise(libc::SIGKILL); }
     loop {}
@@ -93,12 +313,44 @@ mod unit_tests {
         b.reserve(1024);
         let s = &mut b[..];
         assert!(s.len() == 1024);
+        let s = &b[..];
+        assert!(s.len() == 1024);
         let mut b = [ 0u8; 10 ];
         let s = misc::u32toa(1234, &mut b);
         assert!(s == b"1234");
         let mut pat: [ u8; 6 ] = [ b's', b'l', b'i', b'c', b'e', 0 ];
         let s = misc::slice_from_c_str(pat.as_mut_ptr());
         assert!(s == b"slice");
+    }
+
+    #[test]
+    fn verify_config() {
+        let config = parse_config(b"");
+        assert!(slice_from_c_str(config.core_dir) == b"/var/dumpcore");
+        assert!(slice_from_c_str(config.core_user) == b"root");
+        assert!(slice_from_c_str(config.core_group) == b"root");
+        assert!(config.core_autoclean == false);
+        assert!(slice_from_c_str(config.gdb ) == b"/usr/bin/gdb");
+
+        let config = parse_config(b"CORE_DIR=/var/lib/dumpcore\n");
+        assert!(slice_from_c_str(config.core_dir) == b"/var/lib/dumpcore");
+
+        let config = parse_config(b"CORE_AUTOCLEAN\n");
+        assert!(config.core_autoclean == true);
+        let config = parse_config(b"CORE_AUTOCLEAN=1\n");
+        assert!(config.core_autoclean == true);
+        let config = parse_config(b"CORE_AUTOCLEAN=Y\n");
+        assert!(config.core_autoclean == true);
+
+        let config = parse_config(b"# commented out CORE_DIR=/var/lib/dumpcore\n");
+        assert!(slice_from_c_str(config.core_dir) != b"/var/lib/dumpcore");
+
+        let config = parse_config(b"# leading spaces\n  CORE_USER=nobody\n");
+        assert!(slice_from_c_str(config.core_user) == b"nobody");
+        let config = parse_config(b"# spaces after key\nCORE_USER =nobody\n");
+        assert!(slice_from_c_str(config.core_user) == b"nobody");
+
+        dump_syntax();
     }
 }
 
