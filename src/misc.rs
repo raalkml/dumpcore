@@ -7,6 +7,12 @@ extern crate libc;
 use libc::{STDOUT_FILENO, STDERR_FILENO};
 use core::{mem, slice, ptr};
 
+#[macro_export]
+macro_rules! libc_str {
+    () => (b"\0".as_ptr() as *const libc::c_char);
+    ($($es:expr),+) => ( concat!($($es),+, "\0").as_ptr() as *const libc::c_char );
+}
+
 #[cold]
 pub fn fdput_c_str(fd: i32, arg: *const libc::c_char) {
     if !arg.is_null() {
