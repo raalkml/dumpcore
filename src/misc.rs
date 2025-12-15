@@ -30,7 +30,7 @@ pub fn fdput_bytes(fd: i32, arg: &[u8]) {
 
 pub trait FdPuts { fn fdputs(self, fd: i32); }
 
-impl FdPuts for &'static str {
+impl FdPuts for &str {
     fn fdputs(self, fd: i32) { fdput_bytes(fd, self.as_bytes()) }
 }
 impl FdPuts for &[u8] {
