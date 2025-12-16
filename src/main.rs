@@ -165,8 +165,37 @@ fn dump_proc(core_pid: libc::pid_t, proc_pid_fd: libc::c_int) {
     fdprint!(STDOUT_FILENO, "PROC-", core_pid,"_END\n\n");
 }
 
-fn dump_proc_environ(_core_pid: libc::pid_t, _proc_pid_environ_fd: libc::c_int) {
+fn dump_proc_environ(_core_pid: libc::pid_t, proc_pid_environ_fd: libc::c_int) {
     fdprint!(STDOUT_FILENO, "ENVIRONMENT:\n");
+    let mut b = Buffer::new();
+    const BUFSIZ : libc::size_t = 1024;
+    b.reserve(BUFSIZ);
+    loop {
+        let rd = unsafe { libc::read(proc_pid_environ_fd, b.as_mut_ptr(), BUFSIZ) };
+        if rd < 0 {
+            let errno = unsafe { *libc::__errno_location() };
+            let err = unsafe { libc::strerror(errno) };
+            fdprint!(STDERR_FILENO, "/proc/<pid>/environ: ",
+                     if err.is_null() { libc_str!("") } else { err },
+                     "\n");
+            break;
+        }
+        if rd == 0 { break; }
+        for ch in &b[.. rd as usize] {
+            let ch = match ch {
+                0 => b"\n".as_slice(),
+                b'\t' => br"\t",
+                b'\r' => br"\r",
+                b'\n' => br"\n",
+                b'\x07' => br"\a",
+                b'\x08' => br"\b",
+                b'\x0c' => br"\f",
+                b'\\' => br"\\",
+                _ => &[*ch]
+            };
+            fdprint!(STDOUT_FILENO, ch);
+        }
+    }
     fdprint!(STDOUT_FILENO, "ENVIRONMENT_END\n\n");
 }
 
@@ -190,6 +219,8 @@ pub extern "C" fn main(argc: i32, argv: *const *const i8) -> i32 {
     };
     if argc > 1 {
         let pid = unsafe {*argv.add(1)};
+        // Open /proc/<pid>/... (and read) as soon as possible,
+        // while they still contain the process information
         core.open_pid(pid);
         core.open_pid_files();
         core.pid = misc::c_char_to_long(pid, 10) as libc::pid_t;
