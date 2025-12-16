@@ -156,7 +156,7 @@ fn dump_proc(core_pid: libc::pid_t, proc_pid_fd: libc::c_int) {
                 let ent = unsafe { ent.read() };
                 if ent.d_name[0] == '.' as i8 { continue; }
                 let t = read_symlink(dfd, ent.d_name.as_ptr());
-                fdprint!(STDOUT_FILENO, " fd/", ent.d_name.as_ptr(), " -> ", t.c_str(), "\n");
+                fdprint!(STDOUT_FILENO, " fd/", ent.d_name.as_ptr(), " -> ", t.bytez(), "\n");
             }
         }
         unsafe { libc::closedir(dir) };
@@ -231,7 +231,7 @@ pub extern "C" fn main(argc: i32, argv: *const *const i8) -> i32 {
         b[..][core_dir.len()..].copy_from_slice(CORE_XXX);
         b
     };
-    let core_fd = no_stdio_fd(unsafe { libc::mkstemp(core_file[..].as_ptr() as *mut libc::c_char) });
+    let core_fd = no_stdio_fd(unsafe { libc::mkstemp(core_file.c_str_mut()) });
     fdprint!(STDOUT_FILENO, "tmp core file: ", core_file[..],
              if core_fd == -1 { " (open failed)\n" } else { "\n" });
 
@@ -240,8 +240,8 @@ pub extern "C" fn main(argc: i32, argv: *const *const i8) -> i32 {
     let dump_errors = redirect_fd(STDERR_FILENO, &core_file[..], ".log");
     let dump_txt = redirect_fd(STDOUT_FILENO, &core_file[..], ".txt");
     fdprint!(STDERR_FILENO, "dumpcore started\n");
-    fdprint!(tty, "err file: ", dump_errors.c_str(), "\n");
-    fdprint!(tty, "out file: ", dump_txt.c_str(), "\n");
+    fdprint!(tty, "err file: ", dump_errors.bytez(), "\n");
+    fdprint!(tty, "out file: ", dump_txt.bytez(), "\n");
 
     if core.proc_pid_fd != -1 {
         core.proc_exe = read_symlink(core.proc_pid_fd, libc_str!("exe"));

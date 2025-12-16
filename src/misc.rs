@@ -147,7 +147,13 @@ impl Buffer {
         s[0..src.len()].copy_from_slice(src.as_bytes());
         s[src.len()] = 0;
     }
-    pub fn c_str(&self) -> *const libc::c_char { self.ptr as *const libc::c_char }
+    pub unsafe fn c_str(&self) -> *const libc::c_char { self.ptr as *const libc::c_char }
+    pub unsafe fn c_str_mut(&mut self) -> *mut libc::c_char { self.ptr as *mut libc::c_char }
+    pub fn bytez(&self) -> &[u8] {
+        unsafe {
+            slice::from_raw_parts(self.ptr as *const u8, libc::strnlen(self.c_str(), self.len))
+        }
+    }
     pub unsafe fn as_ptr<T>(&mut self) -> *const T { self.ptr as *const T }
     pub unsafe fn as_mut_ptr<T>(&mut self) -> *mut T { self.ptr as *mut T }
 }
