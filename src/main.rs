@@ -222,7 +222,7 @@ pub extern "C" fn main(argc: i32, argv: *const *const i8) -> i32 {
     fdprint!(STDOUT_FILENO, "core autoclean: ", if config.core_autoclean { "yes" } else { "no" }, "\n");
     fdprint!(STDOUT_FILENO, "GDB path: ", config.gdb, "\n");
 
-    let core_file = {
+    let mut core_file = {
         let mut b = Buffer::new();
         static CORE_XXX: &[u8] = b"/core-XXXXXX\0";
         let core_dir = slice_from_c_str(config.core_dir);
