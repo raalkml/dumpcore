@@ -173,7 +173,7 @@ fn dump_proc_environ(_core_pid: libc::pid_t, _proc_pid_environ_fd: libc::c_int) 
 #[unsafe(no_mangle)]
 pub extern "C" fn main(argc: i32, argv: *const *const i8) -> i32 {
 #[cfg(test)]
-    { unit_test_main(); return 0 }
+    { unit_test_main(); return 0; }
 
     if argc == 2 && slice_from_c_str(unsafe {*argv.add(1)}) == b"--install" {
         return do_install(argc, argv);
