@@ -60,11 +60,11 @@ fn redirect_fd(dst: libc::c_int, prefix: &[u8], suffix: &'static str) -> Buffer 
     let mut name = Buffer::new();
     name.reserve(prefix.len() + suffix.len() + 1);
     let pfxlen = prefix.len() - 1;
-    name[..][..pfxlen].copy_from_slice(&prefix[..pfxlen]);
-    name[..][pfxlen..pfxlen + suffix.len()].copy_from_slice(suffix.as_bytes());
-    name[..][pfxlen + suffix.len()] = 0;
+    name[..pfxlen].copy_from_slice(&prefix[..pfxlen]);
+    name[pfxlen..pfxlen + suffix.len()].copy_from_slice(suffix.as_bytes());
+    name[pfxlen + suffix.len()] = 0;
     let fd = unsafe {
-        libc::open(c_str_of(&name[..]), libc::O_WRONLY | libc::O_APPEND | libc::O_CREAT, 0o640)
+        libc::open(name.c_str(), libc::O_WRONLY | libc::O_APPEND | libc::O_CREAT, 0o640)
     };
     if fd == -1 { return Buffer::new(); }
     unsafe {

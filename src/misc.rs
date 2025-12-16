@@ -228,6 +228,20 @@ impl core::ops::IndexMut<core::ops::Range<usize>> for Buffer {
         }
     }
 }
+impl core::ops::Index<usize> for Buffer {
+    type Output = u8;
+    fn index(&self, index: usize) -> &Self::Output {
+        if index < self.len { unsafe { &*(self.ptr as *const u8).add(index)} }
+        else { panic!("index out-of-bounds") }
+    }
+}
+
+impl core::ops::IndexMut<usize> for Buffer {
+    fn index_mut(&mut self, index: usize) -> &mut Self::Output {
+        if index < self.len { unsafe { &mut *(self.ptr as *mut u8).add(index)} }
+        else { panic!("index out-of-bounds") }
+    }
+}
 
 pub fn u64toa(u: u64, s: &mut [u8]) -> &mut [u8] {
     assert!(s.len() >= 10);
