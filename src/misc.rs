@@ -148,6 +148,8 @@ impl Buffer {
         s[src.len()] = 0;
     }
     pub fn c_str(&self) -> *const libc::c_char { self.ptr as *const libc::c_char }
+    pub unsafe fn as_ptr<T>(&mut self) -> *const T { self.ptr as *const T }
+    pub unsafe fn as_mut_ptr<T>(&mut self) -> *mut T { self.ptr as *mut T }
 }
 impl Drop for Buffer {
     fn drop(&mut self) {
