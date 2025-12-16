@@ -296,7 +296,7 @@ fn my_panic(info: &core::panic::PanicInfo) -> ! {
 }
 
 #[cfg(test)]
-mod unit_tests {
+mod dumpcores {
     use super::*;
 
     #[test]
