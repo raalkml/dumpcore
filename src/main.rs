@@ -227,8 +227,8 @@ pub extern "C" fn main(argc: i32, argv: *const *const i8) -> i32 {
         static CORE_XXX: &[u8] = b"/core-XXXXXX\0";
         let core_dir = slice_from_c_str(config.core_dir);
         b.reserve(core_dir.len() + CORE_XXX.len());
-        b[..][0..core_dir.len()].copy_from_slice(core_dir);
-        b[..][core_dir.len()..].copy_from_slice(CORE_XXX);
+        b[..core_dir.len()].copy_from_slice(core_dir);
+        b[core_dir.len()..].copy_from_slice(CORE_XXX);
         b
     };
     let core_fd = no_stdio_fd(unsafe { libc::mkstemp(core_file.c_str_mut()) });

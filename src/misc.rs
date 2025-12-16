@@ -177,6 +177,57 @@ impl core::ops::IndexMut<core::ops::RangeFull> for Buffer {
         }
     }
 }
+impl core::ops::Index<core::ops::RangeFrom<usize>> for Buffer {
+    type Output = [u8];
+    fn index(&self, index: core::ops::RangeFrom<usize>) -> &Self::Output {
+        let start = if index.start < self.len { index.start } else { self.len };
+        unsafe {
+            core::slice::from_raw_parts((self.ptr as *const u8).add(start), self.len - start)
+        }
+    }
+}
+impl core::ops::IndexMut<core::ops::RangeFrom<usize>> for Buffer {
+    fn index_mut(&mut self, index: core::ops::RangeFrom<usize>) -> &mut Self::Output {
+        let start = if index.start < self.len { index.start } else { self.len };
+        unsafe {
+            core::slice::from_raw_parts_mut((self.ptr as *mut u8).add(start), self.len - start)
+        }
+    }
+}
+impl core::ops::Index<core::ops::RangeTo<usize>> for Buffer {
+    type Output = [u8];
+    fn index(&self, index: core::ops::RangeTo<usize>) -> &Self::Output {
+        let end = if index.end < self.len { index.end } else { self.len };
+        unsafe { core::slice::from_raw_parts(self.ptr as *const u8, end) }
+    }
+}
+impl core::ops::IndexMut<core::ops::RangeTo<usize>> for Buffer {
+    fn index_mut(&mut self, index: core::ops::RangeTo<usize>) -> &mut Self::Output {
+        let end = if index.end < self.len { index.end } else { self.len };
+        unsafe { core::slice::from_raw_parts_mut(self.ptr as *mut u8, end) }
+    }
+}
+impl core::ops::Index<core::ops::Range<usize>> for Buffer {
+    type Output = [u8];
+    fn index(&self, index: core::ops::Range<usize>) -> &Self::Output {
+        let start = if index.start < self.len { index.start } else { self.len };
+        let mut end = if index.end < self.len { index.end } else { self.len };
+        if end < start { end = start; }
+        unsafe {
+            core::slice::from_raw_parts((self.ptr as *const u8).add(start), end - start)
+        }
+    }
+}
+impl core::ops::IndexMut<core::ops::Range<usize>> for Buffer {
+    fn index_mut(&mut self, index: core::ops::Range<usize>) -> &mut Self::Output {
+        let start = if index.start < self.len { index.start } else { self.len };
+        let mut end = if index.end < self.len { index.end } else { self.len };
+        if end < start { end = start; }
+        unsafe {
+            core::slice::from_raw_parts_mut((self.ptr as *mut u8).add(start), end - start)
+        }
+    }
+}
 
 pub fn u64toa(u: u64, s: &mut [u8]) -> &mut [u8] {
     assert!(s.len() >= 10);
