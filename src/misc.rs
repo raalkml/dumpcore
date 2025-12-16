@@ -125,7 +125,7 @@ pub struct Buffer {
 
 impl Buffer {
     pub fn new() -> Self { Buffer { ptr: ptr::null_mut(), len: 0 } }
-    pub fn from_str(src: &'static str) -> Self {
+    pub fn from_str(src: &str) -> Self {
         let mut b = Buffer { ptr: ptr::null_mut(), len: 0 };
         b.strcpy(src);
         b
@@ -139,7 +139,7 @@ impl Buffer {
     pub fn reserve(&mut self, space: usize) {
         if self.len < space { self.realloc(space); }
     }
-    pub fn strcpy(&mut self, src: &'static str) {
+    pub fn strcpy(&mut self, src: &str) {
         self.reserve(src.len() + 1);
         let s = unsafe {
             core::slice::from_raw_parts_mut(self.ptr as *mut u8, self.len)
