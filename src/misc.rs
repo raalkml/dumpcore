@@ -62,6 +62,35 @@ impl FdPuts for u32 {
         fdput_bytes(fd, u32toa(self, &mut [ 0u8; 10 ]))
     }
 }
+impl FdPuts for i64 {
+    fn fdputs(self, fd: i32) {
+        let v;
+        if self < 0 {
+            v = -self;
+            fdput_bytes(fd, b"-");
+        } else {
+            v = self;
+        }
+        fdput_bytes(fd, u64toa(v as u64, &mut [ 0u8; 24 ]))
+    }
+}
+impl FdPuts for u64 {
+    fn fdputs(self, fd: i32) {
+        fdput_bytes(fd, u64toa(self, &mut [ 0u8; 24 ]))
+    }
+}
+impl FdPuts for isize {
+    fn fdputs(self, fd: i32) {
+        let v;
+        if self < 0 {
+            v = -self;
+            fdput_bytes(fd, b"-");
+        } else {
+            v = self;
+        }
+        fdput_bytes(fd, u64toa(v as u64, &mut [ 0u8; 24 ]))
+    }
+}
 impl FdPuts for usize {
     fn fdputs(self, fd: i32) {
         let mut buf = [ 0u8; 20 ];
