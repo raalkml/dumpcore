@@ -199,6 +199,42 @@ fn dump_proc_environ(_core_pid: libc::pid_t, proc_pid_environ_fd: libc::c_int) {
     fdprint!(STDOUT_FILENO, "ENVIRONMENT_END\n\n");
 }
 
+fn copy_core(core_in: libc::c_int, core_out: libc::c_int) {
+    let mut fs: core::mem::MaybeUninit<libc::statfs> = core::mem::MaybeUninit::uninit();
+    let ret = unsafe { libc::fstatfs(core_out, fs.as_mut_ptr() as *mut libc::statfs) };
+    let block_size = if ret == -1 {
+        16 * libc::__fsword_t::from(libc::BUFSIZ)
+    } else {
+        64 * unsafe { fs.assume_init_ref() }.f_bsize
+    };
+    let mut done: i64 = 0;
+    let mut b = Buffer::new();
+    b.reserve(block_size as usize);
+    loop {
+        let mut ret = unsafe { libc::read(core_in, b.as_mut_ptr(), block_size as usize) };
+        if ret == 0 { break; }
+        let errno = unsafe { *libc::__errno_location() };
+        if libc::EINTR == errno { continue };
+        if ret == -1 {
+            fdprint!(STDERR_FILENO, "core: read: ", unsafe { libc::strerror(errno) }, "\n");
+            break;
+        }
+        done += ret as i64;
+        let mut p = unsafe { b.as_ptr() };
+        while ret > 0 {
+            let wr = unsafe { libc::write(core_out, p, ret as usize) };
+            if wr == -1 {
+                let errno = unsafe { *libc::__errno_location() };
+                fdprint!(STDERR_FILENO, "core: write: ", unsafe { libc::strerror(errno) }, "\n");
+                return;
+            }
+            ret -= wr;
+            p = unsafe { p.add(wr as usize) };
+            fdprint!(STDERR_FILENO, "core: saved ", done, "\n");
+        }
+    }
+}
+
 #[unsafe(no_mangle)]
 pub extern "C" fn main(argc: i32, argv: *const *const i8) -> i32 {
 #[cfg(test)]
@@ -263,8 +299,9 @@ pub extern "C" fn main(argc: i32, argv: *const *const i8) -> i32 {
         b
     };
     let core_fd = no_stdio_fd(unsafe { libc::mkstemp(core_file.c_str_mut()) });
-    fdprint!(STDOUT_FILENO, "tmp core file: ", core_file[..],
-             if core_fd == -1 { " (open failed)\n" } else { "\n" });
+    if core_fd == -1 {
+        fdprint!(STDERR_FILENO, core_file[..], ": tmp core file: open failed\n");
+    }
 
     let tty = unsafe { libc::open(libc_str!("/dev/tty"), libc::O_WRONLY, 0) };
 
@@ -302,8 +339,8 @@ pub extern "C" fn main(argc: i32, argv: *const *const i8) -> i32 {
         dump_proc_environ(core.pid, core.proc_pid_environ.fd);
         // trace_pid();
     }
-    // copy_core(core_fd);
-    // unsafe { libc::close(core_fd); }
+    copy_core(STDIN_FILENO, core_fd);
+    unsafe { libc::close(core_fd); }
 
     if config.core_autoclean {
         fdprint!(STDOUT_FILENO, "CORE-AUTOCLEAN: Y\n");
