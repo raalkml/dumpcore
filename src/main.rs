@@ -134,16 +134,16 @@ fn read_symlink(dirfd: libc::c_int, name: *const libc::c_char) -> Buffer {
         }
     };
     b[..][ret] = 0;
-    b.realloc(ret + 1);
+    b.realloc(ret);
     b
 }
 
 fn dump_proc(core_pid: libc::pid_t, proc_pid_fd: libc::c_int) {
     fdprint!(STDOUT_FILENO, "PROC-", core_pid, ":\n");
     let proc_root = read_symlink(proc_pid_fd, libc_str!("root"));
-    fdprint!(STDOUT_FILENO, " root -> ", &proc_root[..], "\n");
+    fdprint!(STDOUT_FILENO, " root -> ", proc_root[..], "\n");
     let proc_cwd = read_symlink(proc_pid_fd, libc_str!("cwd"));
-    fdprint!(STDOUT_FILENO, " cwd -> ", &proc_cwd[..], "\n");
+    fdprint!(STDOUT_FILENO, " cwd -> ", proc_cwd[..], "\n");
     let dfd = unsafe {
         libc::openat(proc_pid_fd, libc_str!("fd"), libc::O_DIRECTORY | libc::O_RDONLY)
     };
