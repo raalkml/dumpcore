@@ -278,48 +278,47 @@ quit
 "#;
 fn run_gdb(gdb: *const libc::c_char, exe: *const libc::c_char, core_file: &[u8], core: &Core) -> libc::c_int {
 
-    let mut fd : [libc::c_int; 2] = [ -1, -1 ];
-    let ret = unsafe { libc::pipe(fd.as_mut_ptr()) };
-    if ret == -1 {
-        fdprint!(STDERR_FILENO, "pipe (gdb): ", errno_s(), "\n");
-        return -1;
-    }
-    let pid = unsafe { libc::fork() };
-    if pid == -1 {
-        fdprint!(STDERR_FILENO, "fork (gdb): ", errno_s(), "\n");
-        return -1;
-    }
-    if pid == 0 {
-        unsafe {
-            libc::close(fd[1]);
-            libc::dup2(fd[0], STDIN_FILENO);
+    unsafe {
+        use libc::{setns,close,dup2,pipe,write,fork,access,execlp,waitpid,exit,strerror};
+        let mut fd : [libc::c_int; 2] = [ -1, -1 ];
+        let ret = pipe(fd.as_mut_ptr());
+        if ret == -1 {
+            fdprint!(STDERR_FILENO, "pipe (gdb): ", errno_s(), "\n");
+            return -1;
+        }
+        let pid = fork();
+        if pid == -1 {
+            fdprint!(STDERR_FILENO, "fork (gdb): ", errno_s(), "\n");
+            return -1;
+        }
+        if pid == 0 {
+            close(fd[1]);
+            dup2(fd[0], STDIN_FILENO);
             if fd[0] != STDIN_FILENO { libc::close(fd[0]); }
             if core.proc_pid_ns_mnt.fd == -1 {
                 fdprint!(STDERR_FILENO, "gdb: /proc/", core.pid, "/ns/mnt: ",
-                        libc::strerror(core.proc_pid_ns_mnt.err), "\n");
-            } else if libc::setns(core.proc_pid_ns_mnt.fd, libc::CLONE_NEWNS) == -1 {
+                    strerror(core.proc_pid_ns_mnt.err), "\n");
+            } else if setns(core.proc_pid_ns_mnt.fd, libc::CLONE_NEWNS) == -1 {
                 fdprint!(STDERR_FILENO, "gdb (setns): /proc/", core.pid, "/ns/mnt: ",
-                        errno_s(), "\n");
+                errno_s(), "\n");
             }
-            if !exe.is_null() && libc::access(exe, libc::R_OK) != 0 {
+            if !exe.is_null() && access(exe, libc::R_OK) != 0 {
                 fdprint!(STDERR_FILENO, "GDB: ", exe, ": ", errno_s(), "\n");
             }
-            libc::execlp(gdb, libc_str!("gdb"), libc_str!("-q"), libc_str!("--nh"),
-                         libc_str!("--nx"), libc_str!("-ex"), libc_str!("set prompt"),
-                         if exe.is_null() { libc_str!("/dev/null") } else { exe },
-                         core_file.as_ptr(), core::ptr::null::<libc::c_char>());
+            execlp(gdb, libc_str!("gdb"), libc_str!("-q"), libc_str!("--nh"),
+            libc_str!("--nx"), libc_str!("-ex"), libc_str!("set prompt"),
+            if exe.is_null() { libc_str!("/dev/null") } else { exe },
+            core_file.as_ptr(), core::ptr::null::<libc::c_char>());
             fdprint!(STDERR_FILENO, "exec ", gdb, ": ", errno_s(), "\n");
-            libc::exit(2);
+            exit(2);
         }
-    }
-    unsafe {
-        libc::close(fd[0]);
-        if libc::write(fd[1], GDB_CMD.as_ptr() as *const libc::c_void, GDB_CMD.len()) == -1 {
+        close(fd[0]);
+        if write(fd[1], GDB_CMD.as_ptr() as *const libc::c_void, GDB_CMD.len()) == -1 {
             fdprint!(STDERR_FILENO, "write (gdb cmd): ", errno_s(), "\n");
         }
-        libc::close(fd[1]);
+        close(fd[1]);
         let mut status : libc::c_int = 0;
-        if libc::waitpid(pid, &raw mut status, 0) == -1 {
+        if waitpid(pid, &raw mut status, 0) == -1 {
             fdprint!(STDERR_FILENO, "wait (gdb): ", errno_s(), "\n");
         }
         status
