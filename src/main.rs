@@ -9,6 +9,7 @@ extern crate core;
 extern crate libc;
 use libc::{STDIN_FILENO, STDOUT_FILENO, STDERR_FILENO};
 //use core::{mem, slice, ptr};
+use core::iter;
 mod misc;
 mod config;
 
@@ -118,6 +119,16 @@ impl Drop for Core {
     }
 }
 
+fn errno_s() -> *const libc::c_char {
+    let ret = unsafe { libc::strerror(*libc::__errno_location()) };
+    if ret.is_null() {
+        static NO_ERROR_TEXT : [libc::c_char; 1] = [ 0 ];
+        NO_ERROR_TEXT.as_ptr()
+    } else {
+        ret
+    }
+}
+
 fn read_symlink(dirfd: libc::c_int, name: *const libc::c_char) -> Buffer {
     use core::ops::IndexMut;
     let mut b = Buffer::new();
@@ -138,8 +149,8 @@ fn read_symlink(dirfd: libc::c_int, name: *const libc::c_char) -> Buffer {
     b
 }
 
-fn dump_proc(core_pid: libc::pid_t, proc_pid_fd: libc::c_int) {
-    fdprint!(STDOUT_FILENO, "PROC-", core_pid, ":\n");
+fn dump_proc(proc_pid_fd: libc::c_int) {
+    fdprint!(STDOUT_FILENO, "PROC:\n");
     let proc_root = read_symlink(proc_pid_fd, libc_str!("root"));
     fdprint!(STDOUT_FILENO, " root -> ", proc_root[..], "\n");
     let proc_cwd = read_symlink(proc_pid_fd, libc_str!("cwd"));
@@ -162,7 +173,7 @@ fn dump_proc(core_pid: libc::pid_t, proc_pid_fd: libc::c_int) {
         unsafe { libc::closedir(dir) };
     }
 
-    fdprint!(STDOUT_FILENO, "PROC-", core_pid,"_END\n\n");
+    fdprint!(STDOUT_FILENO, "PROC_END\n\n");
 }
 
 fn dump_proc_environ(_core_pid: libc::pid_t, proc_pid_environ_fd: libc::c_int) {
@@ -173,11 +184,7 @@ fn dump_proc_environ(_core_pid: libc::pid_t, proc_pid_environ_fd: libc::c_int) {
     loop {
         let rd = unsafe { libc::read(proc_pid_environ_fd, b.as_mut_ptr(), BUFSIZ) };
         if rd < 0 {
-            let errno = unsafe { *libc::__errno_location() };
-            let err = unsafe { libc::strerror(errno) };
-            fdprint!(STDERR_FILENO, "/proc/<pid>/environ: ",
-                     if err.is_null() { libc_str!("") } else { err },
-                     "\n");
+            fdprint!(STDERR_FILENO, "/proc/<pid>/environ: ", errno_s(), "\n");
             break;
         }
         if rd == 0 { break; }
@@ -232,6 +239,90 @@ fn copy_core(core_in: libc::c_int, core_out: libc::c_int) {
             p = unsafe { p.add(wr as usize) };
             fdprint!(STDERR_FILENO, "core: saved ", done, "\n");
         }
+    }
+}
+
+fn log_wait_status(label: *const libc::c_char, status: libc::c_int)
+{
+    if libc::WIFEXITED(status) && libc::WEXITSTATUS(status) != 0 {
+        fdprint!(STDERR_FILENO, label, ": finished with ", libc::WEXITSTATUS(status), "\n");
+    } else if libc::WIFSIGNALED(status) {
+        fdprint!(STDERR_FILENO, label, ": killed (",
+                 unsafe { libc::strsignal(libc::WTERMSIG(status)) },
+                 ")\n");
+    }
+}
+
+static GDB_CMD : &'static str = r#"
+set print pretty on
+set pagination off
+set confirm off
+set prompt
+set editing off
+set verbose off
+set interactive-mode off
+printf "Threads:\n"
+info threads
+printf "Stack:\n"
+info locals
+info stack
+printf "Environment:\n"
+set $i=0
+while environ[$i]
+ if $i == 0
+  printf "\n"
+ end
+ printf "%s\n", environ[$i++]
+end
+quit
+"#;
+fn run_gdb(gdb: *const libc::c_char, exe: *const libc::c_char, core_file: &[u8], core: &Core) -> libc::c_int {
+
+    let mut fd : [libc::c_int; 2] = [ -1, -1 ];
+    let ret = unsafe { libc::pipe(fd.as_mut_ptr()) };
+    if ret == -1 {
+        fdprint!(STDERR_FILENO, "pipe (gdb): ", errno_s(), "\n");
+        return -1;
+    }
+    let pid = unsafe { libc::fork() };
+    if pid == -1 {
+        fdprint!(STDERR_FILENO, "fork (gdb): ", errno_s(), "\n");
+        return -1;
+    }
+    if pid == 0 {
+        unsafe {
+            libc::close(fd[1]);
+            libc::dup2(fd[0], STDIN_FILENO);
+            if fd[0] != STDIN_FILENO { libc::close(fd[0]); }
+            if core.proc_pid_ns_mnt.fd == -1 {
+                fdprint!(STDERR_FILENO, "gdb: /proc/", core.pid, "/ns/mnt: ",
+                        libc::strerror(core.proc_pid_ns_mnt.err), "\n");
+            } else if libc::setns(core.proc_pid_ns_mnt.fd, libc::CLONE_NEWNS) == -1 {
+                fdprint!(STDERR_FILENO, "gdb (setns): /proc/", core.pid, "/ns/mnt: ",
+                        errno_s(), "\n");
+            }
+            if !exe.is_null() && libc::access(exe, libc::R_OK) != 0 {
+                fdprint!(STDERR_FILENO, "GDB: ", exe, ": ", errno_s(), "\n");
+            }
+            libc::execlp(gdb, libc_str!("gdb"), libc_str!("-q"), libc_str!("--nh"),
+                         libc_str!("--nx"), libc_str!("-ex"), libc_str!("set prompt"),
+                         if exe.is_null() { libc_str!("/dev/null") } else { exe },
+                         core_file.as_ptr(), core::ptr::null::<libc::c_char>());
+            fdprint!(STDERR_FILENO, "exec ", gdb, ": ", errno_s(), "\n");
+            libc::exit(2);
+        }
+    }
+    unsafe {
+        libc::close(fd[0]);
+        if libc::write(fd[1], GDB_CMD.as_ptr() as *const libc::c_void, GDB_CMD.len()) == -1 {
+            fdprint!(STDERR_FILENO, "write (gdb cmd): ", errno_s(), "\n");
+        }
+        libc::close(fd[1]);
+        let mut status : libc::c_int = 0;
+        if libc::waitpid(pid, &raw mut status, 0) == -1 {
+            fdprint!(STDERR_FILENO, "wait (gdb): ", errno_s(), "\n");
+        }
+        status
     }
 }
 
@@ -314,9 +405,7 @@ pub extern "C" fn main(argc: i32, argv: *const *const i8) -> i32 {
     if core.proc_pid_fd != -1 {
         core.proc_exe = read_symlink(core.proc_pid_fd, libc_str!("exe"));
         if core.proc_exe[..].len() == 0 {
-            let errno = unsafe { *libc::__errno_location() };
-            let error = unsafe { libc::strerror(errno) };
-            fdprint!(tty, "/proc/<pid>/exe: readlinkat failed (", error, ")\n");
+            fdprint!(tty, "/proc/<pid>/exe: readlinkat failed (", errno_s(), ")\n");
         } else {
             fdprint!(tty, "/proc/<pid>/exe: ", &core.proc_exe[..], "\n");
         }
@@ -335,12 +424,36 @@ pub extern "C" fn main(argc: i32, argv: *const *const i8) -> i32 {
     fdprint!(STDOUT_FILENO, "DUMPCORE_ARGS_END\n\n");
 
     if core.pid != -1 {
-        dump_proc(core.pid, core.proc_pid_fd);
+        dump_proc(core.proc_pid_fd);
         dump_proc_environ(core.pid, core.proc_pid_environ.fd);
         // trace_pid();
     }
     copy_core(STDIN_FILENO, core_fd);
     unsafe { libc::close(core_fd); }
+    if core.pid != -1 {
+        let mut status: libc::c_int = -1;
+        if core.proc_exe[..].len() != 0 {
+            fdprint!(STDOUT_FILENO, "GDB:\n");
+            status = run_gdb(config.gdb, unsafe { core.proc_exe.c_str() }, &core_file[..], &core);
+            fdprint!(STDOUT_FILENO, "\nGDB_END\n\n");
+            log_wait_status(config.gdb, status);
+        }
+        if !core.exe.is_null() && (!libc::WIFEXITED(status) || libc::WEXITSTATUS(status) != 0) {
+            if core.proc_exe[..].len() == 0 {
+                fdprint!(STDERR_FILENO, "GDB: no /proc/self/exe\n");
+            }
+            let exe = slice_from_c_str(core.exe);
+            let mut b = Buffer::new();
+            b.reserve(exe.len() + 1);
+            for (a, b) in iter::zip(b[..].iter_mut(), exe)  {
+                *a = if *b == b'!' { b'/' } else { *b }
+            }
+            fdprint!(STDOUT_FILENO, "GDB2:\n");
+            let status = run_gdb(config.gdb, unsafe { core.proc_exe.c_str() }, &core_file[..], &core);
+            fdprint!(STDOUT_FILENO, "\nGDB2_END\n\n");
+            log_wait_status(config.gdb, status);
+        }
+    }
 
     if config.core_autoclean {
         fdprint!(STDOUT_FILENO, "CORE-AUTOCLEAN: Y\n");
