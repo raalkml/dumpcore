@@ -154,6 +154,26 @@ fn read_symlink(dirfd: libc::c_int, name: *const libc::c_char) -> Buffer {
     b
 }
 
+fn read_file(dirfd: libc::c_int, name: *const libc::c_char) -> Buffer {
+    let mut b = Buffer::new();
+    let fd = unsafe { libc::openat(dirfd, name, libc::O_RDONLY, 0) };
+    if fd == -1 { return b; }
+    let mut size : usize = 384;
+    let mut total : usize = 0;
+    loop {
+        b.reserve(size);
+        let s = &mut b[total..size];
+        let ret = unsafe { libc::read(fd, s.as_mut_ptr() as *mut libc::c_void, s.len()) };
+        if ret < 0 { return Buffer::new(); }
+        if ret == 0 { break; }
+        total += ret as usize;
+        size += 64;
+    }
+    b[..][total] = b'\0';
+    b.realloc(total);
+    b
+}
+
 fn dump_proc(proc_pid_fd: libc::c_int) {
     fdprint!(STDOUT_FILENO, "PROC:\n");
     let proc_root = read_symlink(proc_pid_fd, libc_str!("root"));
@@ -331,6 +351,48 @@ fn run_gdb(gdb: *const libc::c_char, exe: *const libc::c_char, core_file: &[u8],
     }
 }
 
+fn trace_pid(core: &Core) {
+    use iter::{zip, chain};
+    let mut proc_pid_fd = core.proc_pid_fd;
+    if proc_pid_fd == -1 { return; }
+    fdprint!(STDOUT_FILENO, "PID_TRACE:\n");
+    loop {
+        let mut proc_path : [u8; 4 /* ../ */ + 16 /* pid */] = [ 0; 20 ];
+        unsafe { libc::strcpy(proc_path.as_mut_ptr() as *mut libc::c_char, libc_str!("stat")); }
+        let b = read_file(proc_pid_fd, libc_str!("stat"));
+        if b[..].len() == 0 { break; }
+
+        let mut p = unsafe { libc::strstr(b.c_str(), libc_str!(") ")) };
+        p = unsafe { libc::strstr(p.add(2), libc_str!(" ")).add(1) };
+        let e = unsafe { libc::strstr(p as *const libc::c_char, libc_str!(" ")) };
+        let l = unsafe { e.offset_from(p) } as usize;
+        let stat_ppid = unsafe { core::slice::from_raw_parts(p as *const u8, l) };
+        for (a, b) in zip(&mut proc_path[0..3 + l + 1], chain(b"../", stat_ppid).chain(b"\0")) {
+            *a = *b;
+        }
+        let fd = unsafe { libc::openat(proc_pid_fd, proc_path.as_ptr() as *const libc::c_char, libc::O_PATH, 0) };
+        if fd == -1 {
+            fdprint!(STDERR_FILENO, "trace_pid: ",
+                     proc_path.as_ptr() as *const libc::c_char, errno_s(), "\n");
+            break;
+        }
+        if proc_pid_fd != core.proc_pid_fd { unsafe { libc::close(proc_pid_fd); } }
+        proc_pid_fd = fd;
+        fdprint!(STDOUT_FILENO, "pid: ", proc_path[3 .. 3 + l], "\n");
+        let b = read_file(proc_pid_fd, libc_str!("cmdline"));
+        if b[..].len() > 0 { fdprint!(STDOUT_FILENO, "cmdline: ", b[..], "\n"); }
+        let b = read_symlink(proc_pid_fd, libc_str!("exe"));
+        if b[..].len() > 0 { fdprint!(STDOUT_FILENO, "exe: ", b[..], "\n"); }
+        let b = read_symlink(proc_pid_fd, libc_str!("cwd"));
+        if b[..].len() > 0 { fdprint!(STDOUT_FILENO, "cwd: ", b[..], "\n"); }
+        let b = read_symlink(proc_pid_fd, libc_str!("root"));
+        if b[..].len() > 0 { fdprint!(STDOUT_FILENO, "root: ", b[..], "\n"); }
+        if l == 1 && proc_path[3] == b'1' { break; } // init(1)
+    }
+    if proc_pid_fd != core.proc_pid_fd { unsafe { libc::close(proc_pid_fd); } }
+    fdprint!(STDOUT_FILENO, "PID_TRACE_END\n\n");
+}
+
 #[unsafe(no_mangle)]
 pub extern "C" fn main(argc: i32, argv: *const *const i8) -> i32 {
 #[cfg(test)]
@@ -431,7 +493,7 @@ pub extern "C" fn main(argc: i32, argv: *const *const i8) -> i32 {
     if core.pid != -1 {
         dump_proc(core.proc_pid_fd);
         dump_proc_environ(core.pid, core.proc_pid_environ.fd);
-        // trace_pid();
+        trace_pid(&core);
     }
     copy_core(STDIN_FILENO, core_fd);
     unsafe { libc::close(core_fd); }
