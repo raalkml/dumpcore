@@ -28,6 +28,12 @@ pub fn fdput_bytes(fd: i32, arg: &[u8]) {
     }
 }
 
+pub fn fdput_c_chars(fd: i32, arg: &[libc::c_char]) {
+    unsafe {
+        libc::write(fd, arg.as_ptr() as *const libc::c_void, arg.len());
+    }
+}
+
 pub trait FdPuts { fn fdputs(self, fd: i32); }
 
 impl FdPuts for &str {
@@ -35,6 +41,9 @@ impl FdPuts for &str {
 }
 impl FdPuts for &[u8] {
     fn fdputs(self, fd: i32) { fdput_bytes(fd, self) }
+}
+impl FdPuts for &[libc::c_char] {
+    fn fdputs(self, fd: i32) { fdput_c_chars(fd, self) }
 }
 impl FdPuts for *const libc::c_char {
     fn fdputs(self, fd: i32) {
