@@ -312,9 +312,9 @@ fn run_gdb(gdb: *const libc::c_char, exe: *const libc::c_char, core_file: &[u8],
             }
             dup2(STDOUT_FILENO, STDERR_FILENO);
             execlp(gdb, libc_str!("gdb"), libc_str!("-q"), libc_str!("--nh"),
-            libc_str!("--nx"), libc_str!("-ex"), libc_str!("set prompt"),
-            if exe.is_null() { libc_str!("/dev/null") } else { exe },
-            core_file.as_ptr(), core::ptr::null::<libc::c_char>());
+                   libc_str!("--nx"), libc_str!("-ex"), libc_str!("set prompt"),
+                   if exe.is_null() { libc_str!("/dev/null") } else { exe },
+                   core_file.as_ptr(), core::ptr::null::<libc::c_char>());
             fdprint!(STDERR_FILENO, "exec ", gdb, ": ", errno_s(), "\n");
             exit(2);
         }
