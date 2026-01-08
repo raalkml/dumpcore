@@ -39,16 +39,21 @@ struct Core {
 }
 
 /// Duplicates the passed file handle until it is not one of the stdio handles.
+/// Returns -1 in case of error. errno is no reliable, unfortunately
 fn no_stdio_fd(fd: libc::c_int) -> libc::c_int {
     let mut fd = fd;
     let mut close_fd : [ libc::c_int; 3 ] = [ -1, -1, -1 ];
     let mut close_pos = 0;
-    for t in [ STDIN_FILENO, STDOUT_FILENO, STDERR_FILENO ] {
-        if fd == t {
-            close_fd[close_pos] = fd;
-            close_pos += 1;
-            fd = unsafe { libc::fcntl(fd, libc::F_DUPFD_CLOEXEC, 1) };
+    'outer: loop {
+        for t in [ STDIN_FILENO, STDOUT_FILENO, STDERR_FILENO ] {
+            if fd == t {
+                close_fd[close_pos] = fd;
+                close_pos += 1;
+                fd = unsafe { libc::fcntl(fd, libc::F_DUPFD_CLOEXEC, 1) };
+                if fd != -1 { continue 'outer; }
+            }
         }
+        break;
     }
     for t in close_fd {
         if t != -1 { unsafe { libc::close(t) }; }
