@@ -310,6 +310,7 @@ fn run_gdb(gdb: *const libc::c_char, exe: *const libc::c_char, core_file: &[u8],
             if !exe.is_null() && access(exe, libc::R_OK) != 0 {
                 fdprint!(STDERR_FILENO, "GDB: ", exe, ": ", errno_s(), "\n");
             }
+            dup2(STDOUT_FILENO, STDERR_FILENO);
             execlp(gdb, libc_str!("gdb"), libc_str!("-q"), libc_str!("--nh"),
             libc_str!("--nx"), libc_str!("-ex"), libc_str!("set prompt"),
             if exe.is_null() { libc_str!("/dev/null") } else { exe },
