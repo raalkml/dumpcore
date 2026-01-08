@@ -2,4 +2,4 @@ CORE_DIR=/w/ari/tmp/cores
 CORE_USER=root
 CORE_GROUP=debug
 GDB=/usr/bin/gdb
-CORE_AUTOCLEAN=NO
+CORE_AUTOCLEAN=YES

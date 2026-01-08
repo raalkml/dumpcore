@@ -151,7 +151,9 @@ pub fn parse_config(configuration: &[u8]) -> Config {
                 } else if core::ptr::eq(parser.prefix, &AUTOCLEAN) {
                     let value = &parser.value[..][..parser.value_len];
                     config.core_autoclean =
-                        value == b"1" || value == b"Y" || value == b"y" || value == b"t";
+                        value == b"1" || value == b"Y" || value == b"y" || value == b"t" ||
+                        value == b"YES" || value == b"Yes" || value == b"yes" ||
+                        value == b"TRUE" || value == b"True" || value == b"true";
                 } else if core::ptr::eq(parser.prefix, &GDB) {
                     config.gdb = parser.dup_value();
                 }

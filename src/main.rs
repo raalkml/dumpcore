@@ -526,6 +526,9 @@ pub extern "C" fn main(argc: i32, argv: *const *const i8) -> i32 {
         fdprint!(STDOUT_FILENO, "CORE-AUTOCLEAN: Y\n");
     }
     fdprint!(STDOUT_FILENO, "end\n");
+    if config.core_autoclean {
+        unsafe { libc::unlink(core_file.c_str()); }
+    }
     0
 }
 
