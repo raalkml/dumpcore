@@ -182,6 +182,7 @@ impl Buffer {
     pub fn reserve(&mut self, space: usize) {
         if self.len < space { self.realloc(space); }
     }
+    pub fn is_empty(&self) -> bool { self.len == 0 }
     pub fn strcpy(&mut self, src: &str) {
         self.reserve(src.len() + 1);
         let s = unsafe {

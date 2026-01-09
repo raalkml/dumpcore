@@ -360,7 +360,7 @@ fn trace_pid(core: &Core) {
         let mut proc_path : [u8; 4 /* ../ */ + 16 /* pid */] = [ 0; 20 ];
         unsafe { libc::strcpy(proc_path.as_mut_ptr() as *mut libc::c_char, libc_str!("stat")); }
         let b = read_file(proc_pid_fd, libc_str!("stat"));
-        if b[..].len() == 0 { break; }
+        if b.is_empty() { break; }
 
         let mut p = unsafe { libc::strstr(b.c_str(), libc_str!(") ")) };
         p = unsafe { libc::strstr(p.add(2), libc_str!(" ")).add(1) };
@@ -380,13 +380,13 @@ fn trace_pid(core: &Core) {
         proc_pid_fd = fd;
         fdprint!(STDOUT_FILENO, "pid: ", proc_path[3 .. 3 + l], "\n");
         let b = read_file(proc_pid_fd, libc_str!("cmdline"));
-        if b[..].len() > 0 { fdprint!(STDOUT_FILENO, "cmdline: ", b[..], "\n"); }
+        if !b.is_empty() { fdprint!(STDOUT_FILENO, "cmdline: ", b[..], "\n"); }
         let b = read_symlink(proc_pid_fd, libc_str!("exe"));
-        if b[..].len() > 0 { fdprint!(STDOUT_FILENO, "exe: ", b[..], "\n"); }
+        if !b.is_empty() { fdprint!(STDOUT_FILENO, "exe: ", b[..], "\n"); }
         let b = read_symlink(proc_pid_fd, libc_str!("cwd"));
-        if b[..].len() > 0 { fdprint!(STDOUT_FILENO, "cwd: ", b[..], "\n"); }
+        if !b.is_empty() { fdprint!(STDOUT_FILENO, "cwd: ", b[..], "\n"); }
         let b = read_symlink(proc_pid_fd, libc_str!("root"));
-        if b[..].len() > 0 { fdprint!(STDOUT_FILENO, "root: ", b[..], "\n"); }
+        if !b.is_empty() { fdprint!(STDOUT_FILENO, "root: ", b[..], "\n"); }
         if l == 1 && proc_path[3] == b'1' { break; } // init(1)
     }
     if proc_pid_fd != core.proc_pid_fd { unsafe { libc::close(proc_pid_fd); } }
@@ -471,7 +471,7 @@ pub extern "C" fn main(argc: i32, argv: *const *const i8) -> i32 {
 
     if core.proc_pid_fd != -1 {
         core.proc_exe = read_symlink(core.proc_pid_fd, libc_str!("exe"));
-        if core.proc_exe[..].len() == 0 {
+        if core.proc_exe.is_empty() {
             fdprint!(tty, "/proc/<pid>/exe: readlinkat failed (", errno_s(), ")\n");
         } else {
             fdprint!(tty, "/proc/<pid>/exe: ", &core.proc_exe[..], "\n");
@@ -479,7 +479,7 @@ pub extern "C" fn main(argc: i32, argv: *const *const i8) -> i32 {
     }
 
     fdprint!(STDOUT_FILENO, "CORE-OF: ",
-             if core.proc_exe[..].len() > 0 {
+             if !core.proc_exe.is_empty() {
                  c_str_of(&core.proc_exe[..])
              } else {
                  core.exe
@@ -499,14 +499,14 @@ pub extern "C" fn main(argc: i32, argv: *const *const i8) -> i32 {
     unsafe { libc::close(core_fd); }
     if core.pid != -1 {
         let mut status: libc::c_int = -1;
-        if core.proc_exe[..].len() != 0 {
+        if !core.proc_exe.is_empty() {
             fdprint!(STDOUT_FILENO, "GDB:\n");
             status = run_gdb(config.gdb, unsafe { core.proc_exe.c_str() }, &core_file[..], &core);
             fdprint!(STDOUT_FILENO, "\nGDB_END\n\n");
             log_wait_status(config.gdb, status);
         }
         if !core.exe.is_null() && (!libc::WIFEXITED(status) || libc::WEXITSTATUS(status) != 0) {
-            if core.proc_exe[..].len() == 0 {
+            if core.proc_exe.is_empty() {
                 fdprint!(STDERR_FILENO, "GDB: no /proc/self/exe\n");
             }
             let exe = slice_from_c_str(core.exe);
