@@ -94,7 +94,6 @@ impl Parser {
 }
 
 pub fn load_config(file_name: &'static str) -> Config {
-    fdprint!(STDERR_FILENO, b"config file: ", file_name, b"\n");
     let config_file = Buffer::from_str(file_name);
     let fd = unsafe { libc::open(config_file.c_str(), libc::O_RDONLY | libc::O_NOCTTY, 0) };
     if fd != -1 {

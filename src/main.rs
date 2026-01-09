@@ -18,10 +18,6 @@ use config::*;
 
 static DUMPCORE_CONFIG: &str = "/etc/dumpcore/config";
 
-fn do_install(_argc: i32, _argv: *const *const i8) ->i32 {
-    unimplemented!("dumpcore --install");
-}
-
 struct CorePidFile {
     fd: libc::c_int,
     err: libc::c_int,
@@ -173,6 +169,144 @@ fn read_file(dirfd: libc::c_int, name: *const libc::c_char) -> Buffer {
     b[..][total] = b'\0';
     b.realloc(total);
     b
+}
+
+fn write_file(dirfd: libc::c_int, name: *const libc::c_char, b: &[u8]) -> libc::c_int {
+    let fd = unsafe { libc::openat(dirfd, name, libc::O_WRONLY, 0) };
+    if fd == -1 {
+        return -errno_n();
+    }
+    let ret: libc::c_int =
+        if unsafe { libc::write(fd, b.as_ptr() as *const libc::c_void, b.len()) } == -1 {
+            -errno_n()
+        } else {
+            0
+        };
+    unsafe { libc::close(fd) };
+    ret
+}
+
+fn mkdir_p(path: *const libc::c_char, mode: u32) -> libc::c_int {
+    let mut ret = unsafe { libc::mkdir(path, mode) };
+    let errno = errno_n();
+    if ret == 0 || errno == libc::EEXIST { return 0; }
+    if errno != libc::ENOENT { return -1; }
+    let dir = unsafe { libc::strdup(path) };
+    let end = unsafe { dir.add(libc::strlen(dir)) };
+    let mut slash = dir;
+    while slash < end {
+        let mut s = unsafe { libc::strchr(slash, b'/'.into()) };
+        if s.is_null() { s = unsafe { slash.add(libc::strlen(slash)) }; }
+        if s > slash {
+            unsafe { s.write(0) };
+            ret = unsafe { libc::mkdir(dir, mode) };
+            unsafe { s.write(b'/' as i8) };
+            if ret == -1 && errno_n() != libc::EEXIST { break; }
+        }
+        slash = unsafe { s.add(if *s == 0 { 0 } else { 1 }) };
+    }
+    unsafe { libc::free(dir as *mut libc::c_void) };
+    ret
+}
+
+fn do_install(argv0: *const libc::c_char, arg: *const libc::c_char) -> i32 {
+    let mut exe = read_symlink(libc::AT_FDCWD, libc_str!("/proc/self/exe"));
+    if exe.is_empty() {
+        fdprint!(STDERR_FILENO, "Cannot read /proc/self/exe (", errno_s(),
+                 "), falling back to ", argv0, "\n");
+        exe.bytescpy(slice_from_c_str(argv0));
+    }
+    let mut absexe = Buffer::new();
+    absexe.reserve(libc::PATH_MAX as usize);
+    if unsafe { libc::realpath(exe.c_str(), absexe.as_mut_ptr()) }.is_null() {
+        fdprint!(STDERR_FILENO, "Cannot use ",
+                 unsafe { exe.c_str() },
+                 ": ", errno_s(), "\n");
+        return 1;
+    }
+    absexe.realloc(absexe.bytez().len());
+    let config_file = match option_env!("DUMPCORE_CONFIG") {
+        None => DUMPCORE_CONFIG,
+        Some(e) => e,
+    };
+    fdprint!(STDOUT_FILENO, "Config file: ", config_file, b"\n");
+    let config = load_config(config_file);
+    fdprint!(STDOUT_FILENO, "Executable file: ", absexe[..], "\n");
+    if !config.core_dir.is_null() && unsafe { *config.core_dir } != 0 {
+        if unsafe { libc::chdir(config.core_dir) } == 0 {
+            fdprint!(STDOUT_FILENO, "Core dir: ", config.core_dir, "\n");
+        } else {
+            let mut fail = 0;
+            let errno = errno_n();
+            // If core_dir does not exist, create it (recursively) and set the permissions
+            if errno == libc::ENOENT {
+                if mkdir_p(config.core_dir, 0o750) != 0 && errno_n() != libc::EEXIST {
+                    fdprint!(STDERR_FILENO, "mkdir ", config.core_dir, ": ", errno_s(), "\n");
+                    fail += 1;
+                }
+            } else {
+                fdprint!(STDERR_FILENO, config.core_dir, ": ", errno_s(), "\n");
+                fail += 1;
+            }
+            if fail > 0 {
+                fdprint!(STDERR_FILENO, "The crash reports may be lost!\n");
+            } else {
+                let pw = unsafe { libc::getpwnam(config.core_user) };
+                let gr = unsafe { libc::getgrnam(config.core_group) };
+                let uid : libc::uid_t = if pw.is_null() {
+                    u32::MAX
+                } else {
+                    unsafe { pw.read().pw_uid }
+                };
+                let gid : libc::uid_t = if !gr.is_null() {
+                    unsafe { gr.read().gr_gid }
+                } else {
+                    if pw.is_null() { u32::MAX } else { unsafe { pw.read().pw_gid } }
+                };
+                if unsafe { libc::chown(config.core_dir, uid, gid) } == -1 {
+                    fdprint!(STDERR_FILENO, "chown ",
+                             config.core_user, "[", uid, "]:",
+                             config.core_group, "[", gid, "] ",
+                             config.core_dir, ": ", errno_s(), "\n");
+                }
+            }
+        }
+    }
+    // man 5 core
+    // XXX kernels before 5.3 split the command into argument after
+    // XXX expanding the pattern, breaking names with spaces. Especially
+    // XXX badly with multiple spaces, which collapse. The processing
+    // XXX of such path names (required if exe symlink is gone) involves
+    // XXX a search for the files.
+    static CORE_PATTERN : &[u8] = b"/proc/sys/kernel/core_pattern\0";
+    static CORE_PIPE_LIMIT: &[u8] = b"/proc/sys/kernel/core_pipe_limit\0";
+    static PATTERN: &[u8] = b" %P %p %s %E";
+    let mut s = Buffer::new();
+    s.reserve(1 + absexe[..].len() + PATTERN.len());
+    use iter::{zip,chain};
+    for (a, b) in zip(&mut s[..], chain(b"|", &absexe[..]).chain(PATTERN)) {
+        *a = *b;
+    }
+    fdprint!(STDOUT_FILENO, "echo '", s[..], "' >",
+             CORE_PATTERN[..CORE_PATTERN.len() - 1], "\n");
+    let mut ret = 0;
+    let err = write_file(libc::AT_FDCWD, CORE_PATTERN.as_ptr() as *const libc::c_char, &s[..]);
+    if err < 0 {
+        fdprint!(STDERR_FILENO, CORE_PATTERN, ": ", unsafe { libc::strerror(-err) }, "\n");
+        ret |= 1;
+    }
+    let limit = if unsafe { *arg } == 0 {
+        b"100"
+    } else {
+        slice_from_c_str(if unsafe { *arg } == b'=' as i8 { unsafe { arg.add(1) } }
+                         else { arg })
+    };
+    let err = write_file(libc::AT_FDCWD, CORE_PIPE_LIMIT.as_ptr() as *const libc::c_char, limit);
+    if err < 0 {
+        fdprint!(STDERR_FILENO, CORE_PIPE_LIMIT, ": ", unsafe { libc::strerror(-err) }, "\n");
+        ret |= 1;
+    }
+    ret
 }
 
 fn dump_proc(proc_pid_fd: libc::c_int) {
@@ -393,13 +527,17 @@ fn trace_pid(core: &Core) {
     fdprint!(STDOUT_FILENO, "PID_TRACE_END\n\n");
 }
 
+// The core dump handling program is executed with these arguments:
+//
+//  /../dumpcore <core-pid> <core-pidns-pid> <uid> <signal> <exe-path-/-!>
+//
 #[unsafe(no_mangle)]
 pub extern "C" fn main(argc: i32, argv: *const *const i8) -> i32 {
 #[cfg(test)]
     { unit_test_main(); return 0; }
 
-    if argc == 2 && slice_from_c_str(unsafe {*argv.add(1)}) == b"--install" {
-        return do_install(argc, argv);
+    if argc == 2 && slice_from_c_str(unsafe {*argv.add(1)}).starts_with(b"--install") {
+        return do_install(unsafe { *argv }, unsafe { (*argv.add(1)).add(9) });
     }
     let mut core = Core {
         pid: -1,
