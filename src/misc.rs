@@ -183,13 +183,16 @@ impl Buffer {
         if self.len < space { self.realloc(space); }
     }
     pub fn is_empty(&self) -> bool { self.len == 0 }
-    pub fn strcpy(&mut self, src: &str) {
+    pub fn bytescpy(&mut self, src: &[u8]) {
         self.reserve(src.len() + 1);
         let s = unsafe {
             core::slice::from_raw_parts_mut(self.ptr as *mut u8, self.len)
         };
-        s[0..src.len()].copy_from_slice(src.as_bytes());
+        s[0..src.len()].copy_from_slice(src);
         s[src.len()] = 0;
+    }
+    pub fn strcpy(&mut self, src: &str) {
+        self.bytescpy(src.as_bytes());
     }
     pub unsafe fn c_str(&self) -> *const libc::c_char { self.ptr as *const libc::c_char }
     pub unsafe fn c_str_mut(&mut self) -> *mut libc::c_char { self.ptr as *mut libc::c_char }
