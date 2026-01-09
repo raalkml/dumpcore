@@ -557,18 +557,29 @@ mod dumpcores {
     }
 
     #[test]
-    fn verify_misc() {
-        fdprint!(STDOUT_FILENO, b"Test STDOUT\n");
-        misc::error(b"Test", b"error(prefix, text)");
+    fn verify_buffer() {
         let mut b = misc::Buffer::new();
+        assert!(b.realloc_size(0) == size_of::<usize>());
+        assert!(b.realloc_size(1) == size_of::<usize>());
+        assert!(b.realloc_size(size_of::<usize>()) == 2 * size_of::<usize>());
         b.reserve(1024);
         let s = &mut b[..];
         assert!(s.len() == 1024);
         let s = &b[..];
         assert!(s.len() == 1024);
+    }
+
+    #[test]
+    fn verify_utoa() {
         let mut b = [ 0u8; 10 ];
         let s = misc::u32toa(1234, &mut b);
         assert!(s == b"1234");
+    }
+
+    #[test]
+    fn verify_misc() {
+        fdprint!(STDOUT_FILENO, b"Test STDOUT\n");
+        misc::error(b"Test", b"error(prefix, text)");
         let mut pat: [ u8; 6 ] = [ b's', b'l', b'i', b'c', b'e', 0 ];
         let s = misc::slice_from_c_str(pat.as_mut_ptr());
         assert!(s == b"slice");

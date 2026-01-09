@@ -168,12 +168,17 @@ impl Buffer {
         b.strcpy(src);
         b
     }
-    pub fn realloc(&mut self, space: usize) {
-        let ptr = unsafe { libc::realloc(self.ptr, space) };
+    pub fn realloc_size(&mut self, space: usize) -> usize {
+        // Ensure there is aligned space for at least one byte at the end
+        // of the allocated block: for NUL terminator.
+        let size = (space + size_of::<usize>()).wrapping_div(size_of::<usize>()) * size_of::<usize>();
+        let ptr = unsafe { libc::realloc(self.ptr, size) };
         if ptr.is_null() { panic!("Out of memory") }
         self.ptr = ptr;
         self.len = space;
+        size
     }
+    pub fn realloc(&mut self, space: usize) { self.realloc_size(space); }
     pub fn reserve(&mut self, space: usize) {
         if self.len < space { self.realloc(space); }
     }
