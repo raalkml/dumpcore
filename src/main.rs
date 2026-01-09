@@ -101,14 +101,14 @@ impl Core {
                          libc::O_RDONLY | libc::O_CLOEXEC)
         });
         self.proc_pid_ns_mnt.err = if self.proc_pid_ns_mnt.fd == -1 {
-            unsafe { *libc::__errno_location() }
+            errno_n()
         } else { 0 };
         self.proc_pid_environ.fd = no_stdio_fd(unsafe {
             libc::openat(self.proc_pid_fd, libc_str!("environ"),
                          libc::O_RDONLY | libc::O_CLOEXEC)
         });
         self.proc_pid_environ.err = if self.proc_pid_ns_mnt.fd == -1 {
-            unsafe { *libc::__errno_location() }
+            errno_n()
         } else { 0 };
     }
 
@@ -124,8 +124,9 @@ impl Drop for Core {
     }
 }
 
+fn errno_n() -> libc::c_int { unsafe { *libc::__errno_location() } }
 fn errno_s() -> *const libc::c_char {
-    let ret = unsafe { libc::strerror(*libc::__errno_location()) };
+    let ret = unsafe { libc::strerror(errno_n()) };
     if ret.is_null() {
         static NO_ERROR_TEXT : [libc::c_char; 1] = [ 0 ];
         NO_ERROR_TEXT.as_ptr()
@@ -245,7 +246,7 @@ fn copy_core(core_in: libc::c_int, core_out: libc::c_int) {
     loop {
         let mut ret = unsafe { libc::read(core_in, b.as_mut_ptr(), block_size as usize) };
         if ret == 0 { break; }
-        let errno = unsafe { *libc::__errno_location() };
+        let errno = errno_n();
         if libc::EINTR == errno { continue };
         if ret == -1 {
             fdprint!(STDERR_FILENO, "core: read: ", unsafe { libc::strerror(errno) }, "\n");
@@ -256,8 +257,7 @@ fn copy_core(core_in: libc::c_int, core_out: libc::c_int) {
         while ret > 0 {
             let wr = unsafe { libc::write(core_out, p, ret as usize) };
             if wr == -1 {
-                let errno = unsafe { *libc::__errno_location() };
-                fdprint!(STDERR_FILENO, "core: write: ", unsafe { libc::strerror(errno) }, "\n");
+                fdprint!(STDERR_FILENO, "core: write: ", errno_s(), "\n");
                 return;
             }
             ret -= wr;
