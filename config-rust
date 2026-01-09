@@ -1,4 +1,4 @@
-CORE_DIR=/w/ari/tmp/cores
+CORE_DIR=/w/ari////tmp/cores/a/b/c
 CORE_USER=root
 CORE_GROUP=debug
 GDB=/usr/bin/gdb

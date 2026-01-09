@@ -191,21 +191,28 @@ fn mkdir_p(path: *const libc::c_char, mode: u32) -> libc::c_int {
     let errno = errno_n();
     if ret == 0 || errno == libc::EEXIST { return 0; }
     if errno != libc::ENOENT { return -1; }
-    let dir = unsafe { libc::strdup(path) };
-    let end = unsafe { dir.add(libc::strlen(dir)) };
-    let mut slash = dir;
-    while slash < end {
-        let mut s = unsafe { libc::strchr(slash, b'/'.into()) };
-        if s.is_null() { s = unsafe { slash.add(libc::strlen(slash)) }; }
-        if s > slash {
-            unsafe { s.write(0) };
-            ret = unsafe { libc::mkdir(dir, mode) };
-            unsafe { s.write(b'/' as i8) };
-            if ret == -1 && errno_n() != libc::EEXIST { break; }
+
+    let mut dirfd = libc::AT_FDCWD;
+    for c in slice_from_c_str(path).split(|c| *c == b'/') {
+        if c.len() == 0 {
+            if dirfd == libc::AT_FDCWD {
+                // absolute path (first empty subslice)
+                ret = unsafe { libc::open(libc_str!("/"), libc::O_PATH, 0) };
+                if ret == -1 { break; }
+                dirfd = ret;
+            }
+            continue;
         }
-        slash = unsafe { s.add(if *s == 0 { 0 } else { 1 }) };
+        let mut e = Buffer::new();
+        e.bytescpy(c);
+        ret = unsafe { libc::mkdirat(dirfd, e.c_str(), mode) };
+        if ret == -1 && errno_n() != libc::EEXIST { break; }
+        ret = unsafe { libc::openat(dirfd, e.c_str(), libc::O_PATH, 0) };
+        if ret == -1 { break; }
+        if dirfd != libc::AT_FDCWD { unsafe { libc::close(dirfd) }; }
+        dirfd = ret;
     }
-    unsafe { libc::free(dir as *mut libc::c_void) };
+    if dirfd != libc::AT_FDCWD { unsafe { libc::close(dirfd) }; }
     ret
 }
 
