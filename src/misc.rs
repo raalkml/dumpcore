@@ -164,7 +164,7 @@ pub struct Buffer {
 impl Buffer {
     pub fn new() -> Self { Buffer { ptr: ptr::null_mut(), len: 0 } }
     pub fn from_str(src: &str) -> Self {
-        let mut b = Buffer { ptr: ptr::null_mut(), len: 0 };
+        let mut b = Self::new();
         b.strcpy(src);
         b
     }
