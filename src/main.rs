@@ -90,7 +90,6 @@ impl Core {
             // avoid using the stdin/stdout/stderr file handles
             self.proc_pid_fd = no_stdio_fd(libc::open(c_str_of(&path), libc::O_PATH | libc::O_CLOEXEC, 0));
         }
-        fdprint!(STDOUT_FILENO, b"proc_pid_fd: ", path, b" -> ", self.proc_pid_fd, b"\n");
     }
 
     fn open_pid_files(&mut self) {
@@ -577,10 +576,6 @@ pub extern "C" fn main(argc: i32, argv: *const *const i8) -> i32 {
     if argc > 4 {
         core.exe = unsafe {*argv.add(4)};
     }
-    fdprint!(STDOUT_FILENO, "core pid: ", core.pid, "\n");
-    fdprint!(STDOUT_FILENO, "core ns pid: ", core.ns_pid, "\n");
-    fdprint!(STDOUT_FILENO, "core termination signal: ", core.term_sig, "\n");
-    fdprint!(STDOUT_FILENO, "core exe: ", core.exe, "\n");
 
     // Compile-time environment variable DUMPCORE_CONFIG can be used
     // to set the path to the configuration file.
@@ -588,11 +583,6 @@ pub extern "C" fn main(argc: i32, argv: *const *const i8) -> i32 {
         None => DUMPCORE_CONFIG,
         Some(e) => e,
     });
-    fdprint!(STDOUT_FILENO, "core dir: ", config.core_dir, "\n");
-    fdprint!(STDOUT_FILENO, "core user: ", config.core_user, "\n");
-    fdprint!(STDOUT_FILENO, "core group: ", config.core_group, "\n");
-    fdprint!(STDOUT_FILENO, "core autoclean: ", if config.core_autoclean { "yes" } else { "no" }, "\n");
-    fdprint!(STDOUT_FILENO, "GDB path: ", config.gdb, "\n");
 
     let mut core_file = {
         let mut b = Buffer::new();
@@ -604,24 +594,17 @@ pub extern "C" fn main(argc: i32, argv: *const *const i8) -> i32 {
         b
     };
     let core_fd = no_stdio_fd(unsafe { libc::mkstemp(core_file.c_str_mut()) });
+
+    redirect_fd(STDERR_FILENO, &core_file[..], ".log");
+    redirect_fd(STDOUT_FILENO, &core_file[..], ".txt");
+
     if core_fd == -1 {
         fdprint!(STDERR_FILENO, core_file[..], ": tmp core file: open failed\n");
     }
-
-    let tty = unsafe { libc::open(libc_str!("/dev/tty"), libc::O_WRONLY, 0) };
-
-    let dump_errors = redirect_fd(STDERR_FILENO, &core_file[..], ".log");
-    let dump_txt = redirect_fd(STDOUT_FILENO, &core_file[..], ".txt");
-    fdprint!(STDERR_FILENO, "dumpcore started\n");
-    fdprint!(tty, "err file: ", dump_errors.bytez(), "\n");
-    fdprint!(tty, "out file: ", dump_txt.bytez(), "\n");
-
     if core.proc_pid_fd != -1 {
         core.proc_exe = read_symlink(core.proc_pid_fd, libc_str!("exe"));
         if core.proc_exe.is_empty() {
-            fdprint!(tty, "/proc/<pid>/exe: readlinkat failed (", errno_s(), ")\n");
-        } else {
-            fdprint!(tty, "/proc/<pid>/exe: ", &core.proc_exe[..], "\n");
+            fdprint!(STDERR_FILENO, "/proc/<pid>/exe: readlinkat failed (", errno_s(), ")\n");
         }
     }
 
@@ -632,7 +615,7 @@ pub extern "C" fn main(argc: i32, argv: *const *const i8) -> i32 {
                  core.exe
              }, "\n\n");
     fdprint!(STDOUT_FILENO, "DUMPCORE_ARGS:\n");
-    for i in 1usize .. argc as usize {
+    for i in 1 .. argc as usize {
         fdprint!(STDOUT_FILENO, " ", unsafe {*argv.add(i)}, "\n");
     }
     fdprint!(STDOUT_FILENO, "DUMPCORE_ARGS_END\n\n");
