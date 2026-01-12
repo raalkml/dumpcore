@@ -499,8 +499,6 @@ fn trace_pid(core: &Core) {
     if proc_pid_fd == -1 { return; }
     fdprint!(STDOUT_FILENO, "PID_TRACE:\n");
     loop {
-        let mut proc_path : [u8; 4 /* ../ */ + 16 /* pid */] = [ 0; 20 ];
-        unsafe { libc::strcpy(proc_path.as_mut_ptr() as *mut libc::c_char, libc_str!("stat")); }
         let b = read_file(proc_pid_fd, libc_str!("stat"));
         if b.is_empty() { break; }
 
@@ -509,6 +507,7 @@ fn trace_pid(core: &Core) {
         let e = unsafe { libc::strstr(p as *const libc::c_char, libc_str!(" ")) };
         let l = unsafe { e.offset_from(p) } as usize;
         let stat_ppid = unsafe { core::slice::from_raw_parts(p as *const u8, l) };
+        let mut proc_path : [u8; 4 /* ../ */ + 16 /* pid */] = [ 0; 20 ];
         for (a, b) in zip(&mut proc_path[0..3 + l + 1], chain(b"../", stat_ppid).chain(b"\0")) {
             *a = *b;
         }
