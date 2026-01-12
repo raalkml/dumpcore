@@ -501,14 +501,16 @@ fn trace_pid(core: &Core) {
     loop {
         let b = read_file(proc_pid_fd, libc_str!("stat"));
         if b.is_empty() { break; }
-
-        let mut p = unsafe { libc::strstr(b.c_str(), libc_str!(") ")) };
-        p = unsafe { libc::strstr(p.add(2), libc_str!(" ")).add(1) };
-        let e = unsafe { libc::strstr(p as *const libc::c_char, libc_str!(" ")) };
-        let l = unsafe { e.offset_from(p) } as usize;
-        let stat_ppid = unsafe { core::slice::from_raw_parts(p as *const u8, l) };
+        let mut i = b[..].split(|c| *c == b')');
+        _ = i.next();
+        let Some(r) = i.next() else { break };
+        let mut i = r[1..].split(|c| *c == b' ');
+        _ = i.next();
+        let Some(r) = i.next() else { break };
+        let mut i = r.split(|c| *c == b' ');
+        let Some(stat_ppid) = i.next() else { break };
         let mut proc_path : [u8; 4 /* ../ */ + 16 /* pid */] = [ 0; 20 ];
-        for (a, b) in zip(&mut proc_path[0..3 + l + 1], chain(b"../", stat_ppid).chain(b"\0")) {
+        for (a, b) in zip(&mut proc_path[0..3 + stat_ppid.len() + 1], chain(b"../", stat_ppid).chain(b"\0")) {
             *a = *b;
         }
         let fd = unsafe { libc::openat(proc_pid_fd, proc_path.as_ptr() as *const libc::c_char, libc::O_PATH, 0) };
@@ -519,7 +521,7 @@ fn trace_pid(core: &Core) {
         }
         if proc_pid_fd != core.proc_pid_fd { unsafe { libc::close(proc_pid_fd); } }
         proc_pid_fd = fd;
-        fdprint!(STDOUT_FILENO, "pid: ", proc_path[3 .. 3 + l], "\n");
+        fdprint!(STDOUT_FILENO, "pid: ", proc_path[3 .. 3 + stat_ppid.len()], "\n");
         let b = read_file(proc_pid_fd, libc_str!("cmdline"));
         if !b.is_empty() { fdprint!(STDOUT_FILENO, "cmdline: ", b[..], "\n"); }
         let b = read_symlink(proc_pid_fd, libc_str!("exe"));
@@ -528,7 +530,7 @@ fn trace_pid(core: &Core) {
         if !b.is_empty() { fdprint!(STDOUT_FILENO, "cwd: ", b[..], "\n"); }
         let b = read_symlink(proc_pid_fd, libc_str!("root"));
         if !b.is_empty() { fdprint!(STDOUT_FILENO, "root: ", b[..], "\n"); }
-        if l == 1 && proc_path[3] == b'1' { break; } // init(1)
+        if stat_ppid == b"1" { break; } // init(1)
     }
     if proc_pid_fd != core.proc_pid_fd { unsafe { libc::close(proc_pid_fd); } }
     fdprint!(STDOUT_FILENO, "PID_TRACE_END\n\n");
