@@ -1,0 +1,114 @@
+use super::*;
+
+#[test]
+fn verify_std() {
+    let a = vec!{1, 2, 3};
+    assert_eq!(a, &[1,2,3]);
+}
+
+#[test]
+fn verify_buffer() {
+    let mut b = misc::Buffer::new();
+    assert!(b.realloc_size(0) == size_of::<usize>());
+    assert!(b.realloc_size(1) == size_of::<usize>());
+    assert!(b.realloc_size(size_of::<usize>()) == 2 * size_of::<usize>());
+    b.reserve(1024);
+    let s = &mut b[..];
+    assert!(s.len() == 1024);
+    let s = &b[..];
+    assert!(s.len() == 1024);
+}
+
+#[test]
+fn verify_utoa() {
+    let mut b = [ 0u8; 10 ];
+    let s = misc::u32toa(1234, &mut b);
+    assert!(s == b"1234");
+}
+
+#[test]
+fn verify_misc() {
+    fdprint!(STDOUT_FILENO, b"Test STDOUT\n");
+    misc::error(b"Test", b"error(prefix, text)");
+    let mut pat: [ u8; 6 ] = [ b's', b'l', b'i', b'c', b'e', 0 ];
+    let s = misc::slice_from_c_str(pat.as_mut_ptr());
+    assert!(s == b"slice");
+}
+
+#[test]
+fn verify_config() {
+    let config = parse_config(b"");
+    assert!(slice_from_c_str(config.core_dir) == b"/var/dumpcore");
+    assert!(slice_from_c_str(config.core_user) == b"root");
+    assert!(slice_from_c_str(config.core_group) == b"root");
+    assert!(config.core_autoclean == false);
+    assert!(slice_from_c_str(config.gdb ) == b"/usr/bin/gdb");
+
+    let config = parse_config(b"CORE_DIR=/var/lib/dumpcore\n");
+    assert!(slice_from_c_str(config.core_dir) == b"/var/lib/dumpcore");
+
+    let config = parse_config(b"CORE_AUTOCLEAN\n");
+    assert!(config.core_autoclean == true);
+    let config = parse_config(b"CORE_AUTOCLEAN=1\n");
+    assert!(config.core_autoclean == true);
+    let config = parse_config(b"CORE_AUTOCLEAN=Y\n");
+    assert!(config.core_autoclean == true);
+
+    let config = parse_config(b"# commented out CORE_DIR=/var/lib/dumpcore\n");
+    assert!(slice_from_c_str(config.core_dir) != b"/var/lib/dumpcore");
+
+    let config = parse_config(b"# leading spaces\n  CORE_USER=nobody\n");
+    assert!(slice_from_c_str(config.core_user) == b"nobody");
+    let config = parse_config(b"# spaces after key\nCORE_USER =nobody\n");
+    assert!(slice_from_c_str(config.core_user) == b"nobody");
+
+    dump_syntax();
+}
+
+//
+// An example of how to implement interpolated formatting without std
+//
+#[test]
+fn dosomething() {
+    struct Aaa { i: isize }
+    impl Aaa {
+        fn aaa(&self) -> isize { return self.i }
+    }
+    impl core::fmt::Display for Aaa {
+        fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+            write!(f, "Aaa{{i:{}}}", self.i)
+        }
+    }
+    let aaa = &Aaa{ i: 90 };
+    struct FdWriter {
+        fd : libc::c_int,
+        c : u32
+    }
+    impl core::fmt::Write for FdWriter {
+        fn write_str(&mut self, s: &str) -> core::fmt::Result {
+            fdprint!(self.fd, "\"", s, "\"\n");
+            self.c += 1;
+            Ok(())
+        }
+    }
+    struct Writer {}
+    impl Writer {
+        fn write_fmt(&mut self, args: core::fmt::Arguments<'_>) -> Result<(), core::fmt::Error> {
+            if let Some(a) = args.as_str() {
+                fdprint!(STDERR_FILENO, "'", a, "'");
+                return Ok(());
+            }
+            let mut wr = FdWriter { fd: STDERR_FILENO, c:0 };
+            let _ = core::fmt::write(&mut wr, args);
+            Err(core::fmt::Error)
+        }
+    }
+    let constant = 123456789;
+    let mut o = Writer {};
+    let _ = write!(o, "Begin {} end", "CONST");
+    let _ = write!(o, "begin {} {constant} {} end {}.", "CONST", aaa.aaa(), 2);
+
+    fdprint!(STDERR_FILENO, "\n");
+}
+
+
