@@ -1,5 +1,4 @@
-use core::ptr;
-use core::slice;
+use core::{ptr, slice};
 
 pub struct Buffer {
     ptr: *mut libc::c_void,

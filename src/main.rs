@@ -16,8 +16,8 @@ mod fdprint;
 mod unitests;
 
 use misc::*;
-use buffer::*;
-use config::*;
+use buffer::Buffer;
+use config::load_config;
 
 static DUMPCORE_CONFIG: &str = "/etc/dumpcore/config";
 
