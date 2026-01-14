@@ -11,11 +11,13 @@ use core::iter;
 mod misc;
 mod buffer;
 mod config;
+mod fdprint;
 #[cfg(test)]
 mod unitests;
 
 use misc::*;
 use buffer::*;
+use fdprint::*;
 use config::*;
 
 static DUMPCORE_CONFIG: &str = "/etc/dumpcore/config";
