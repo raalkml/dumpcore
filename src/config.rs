@@ -100,9 +100,9 @@ pub fn load_config(file_name: &'static str) -> Config {
     if fd != -1 {
         let mut configuration = Buffer::new();
         let mut ret = -1;
-        let mut st: core::mem::MaybeUninit<libc::stat> = core::mem::MaybeUninit::uninit();
-        if unsafe { libc::fstat(fd, st.as_mut_ptr()) } == 0 {
-            let file_size = unsafe { st.assume_init_ref() }.st_size as usize;
+        let mut st: libc::stat = unsafe { core::mem::zeroed() };
+        if unsafe { libc::fstat(fd, &mut st ) } == 0 {
+            let file_size = st.st_size as usize;
             configuration.reserve(file_size);
             ret = unsafe { libc::read(fd, configuration[..].as_mut_ptr() as *mut libc::c_void, file_size) };
         }
