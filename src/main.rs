@@ -1,5 +1,4 @@
 #![no_main]
-//#![allow(unused_imports)]
 #![cfg_attr(not(test), no_std)]
 #![cfg_attr(test, allow(unused))]
 #![reexport_test_harness_main = "unit_test_main"]
@@ -8,7 +7,6 @@ extern crate core;
 
 extern crate libc;
 use libc::{STDIN_FILENO, STDOUT_FILENO, STDERR_FILENO};
-//use core::{mem, slice, ptr};
 use core::iter;
 mod misc;
 mod buffer;
