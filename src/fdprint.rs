@@ -117,9 +117,14 @@ impl FdPuts for i8 {
 
 #[macro_export]
 macro_rules! fdprint {
-    ($fd:expr, $s:expr) => ( ($s).fdputs($fd) );
-    ($fd:expr, $s:expr, $($es:expr),+) => (
+    ($fd:expr, $s:expr) => {{
+        use $crate::fdprint::FdPuts as _;
+        ($s).fdputs($fd)
+    }};
+
+    ($fd:expr, $s:expr, $($es:expr),+) => {{
+        use $crate::fdprint::FdPuts as _;
         ($s).fdputs($fd);
         fdprint!($fd, $($es),+)
-    )
+    }};
 }
