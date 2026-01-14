@@ -1,6 +1,7 @@
 extern crate libc;
 use libc::STDERR_FILENO;
 use misc::*;
+use buffer::*;
 
 pub struct Config {
     pub core_dir: *const libc::c_char,

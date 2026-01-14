@@ -11,11 +11,13 @@ use libc::{STDIN_FILENO, STDOUT_FILENO, STDERR_FILENO};
 //use core::{mem, slice, ptr};
 use core::iter;
 mod misc;
+mod buffer;
 mod config;
 #[cfg(test)]
 mod unitests;
 
 use misc::*;
+use buffer::*;
 use config::*;
 
 static DUMPCORE_CONFIG: &str = "/etc/dumpcore/config";
