@@ -1,4 +1,5 @@
 use super::*;
+use Buffer;
 
 #[test]
 fn verify_std() {
@@ -8,7 +9,7 @@ fn verify_std() {
 
 #[test]
 fn verify_buffer() {
-    let mut b = misc::Buffer::new();
+    let mut b = Buffer::new();
     assert!(b.realloc_size(0) == size_of::<usize>());
     assert!(b.realloc_size(1) == size_of::<usize>());
     assert!(b.realloc_size(size_of::<usize>()) == 2 * size_of::<usize>());
@@ -29,7 +30,7 @@ fn verify_utoa() {
 #[test]
 fn verify_misc() {
     fdprint!(STDOUT_FILENO, b"Test STDOUT\n");
-    misc::error(b"Test", b"error(prefix, text)");
+    fdprint!(STDERR_FILENO, b"Test", b"error(prefix, text)");
     let mut pat: [ u8; 6 ] = [ b's', b'l', b'i', b'c', b'e', 0 ];
     let s = misc::slice_from_c_str(pat.as_mut_ptr());
     assert!(s == b"slice");
@@ -37,6 +38,7 @@ fn verify_misc() {
 
 #[test]
 fn verify_config() {
+    use config::{parse_config, dump_syntax};
     let config = parse_config(b"");
     assert!(slice_from_c_str(config.core_dir) == b"/var/dumpcore");
     assert!(slice_from_c_str(config.core_user) == b"root");
