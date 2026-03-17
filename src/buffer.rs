@@ -6,12 +6,15 @@ pub struct Buffer {
 }
 
 impl Buffer {
+    #![allow(unused)]
+
     pub fn new() -> Self { Buffer { ptr: ptr::null_mut(), len: 0 } }
     pub fn from_str(src: &str) -> Self {
         let mut b = Self::new();
         b.strcpy(src);
         b
     }
+
     pub fn realloc_size(&mut self, space: usize) -> usize {
         // Ensure there is aligned space for at least one byte at the end
         // of the allocated block: for NUL terminator.
@@ -27,24 +30,32 @@ impl Buffer {
         if self.len < space { self.realloc(space); }
     }
     pub fn is_empty(&self) -> bool { self.len == 0 }
-    pub fn bytescpy(&mut self, src: &[u8]) {
-        self.reserve(src.len() + 1);
-        let s = unsafe {
-            core::slice::from_raw_parts_mut(self.ptr as *mut u8, self.len)
-        };
-        s[0..src.len()].copy_from_slice(src);
-        s[src.len()] = 0;
+    pub fn size(&self) -> usize { self.len }
+    pub fn bytecpy(&mut self, src: &[u8]) {
+        self.reserve(src.len());
+        self.as_bytes_mut()[0..src.len()].copy_from_slice(src);
     }
     pub fn strcpy(&mut self, src: &str) {
-        self.bytescpy(src.as_bytes());
+        let src = src.as_bytes();
+        self.reserve(src.len() + 1);
+        let b = self.as_bytes_mut();
+        b[0..src.len()].copy_from_slice(src);
+        b[src.len()] = 0;
+    }
+    pub fn as_bytes(&self) -> &[u8] {
+        unsafe { core::slice::from_raw_parts_mut(self.ptr as *mut u8, self.len) }
+    }
+    pub fn as_bytes_mut(&mut self) -> &mut [u8] {
+        unsafe { core::slice::from_raw_parts_mut(self.ptr as *mut u8, self.len) }
+    }
+    pub fn bytez(&self) -> &[u8] {
+        unsafe {
+            let len = libc::strnlen(self.c_str(), self.len);
+            slice::from_raw_parts(self.ptr as *const u8, len)
+        }
     }
     pub unsafe fn c_str(&self) -> *const libc::c_char { self.ptr as *const libc::c_char }
     pub unsafe fn c_str_mut(&mut self) -> *mut libc::c_char { self.ptr as *mut libc::c_char }
-    pub fn bytez(&self) -> &[u8] {
-        unsafe {
-            slice::from_raw_parts(self.ptr as *const u8, libc::strnlen(self.c_str(), self.len))
-        }
-    }
     pub unsafe fn as_ptr<T>(&mut self) -> *const T { self.ptr as *const T }
     pub unsafe fn as_mut_ptr<T>(&mut self) -> *mut T { self.ptr as *mut T }
 }
@@ -133,5 +144,4 @@ impl core::ops::IndexMut<usize> for Buffer {
         else { panic!("index out-of-bounds") }
     }
 }
-
 

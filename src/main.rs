@@ -206,7 +206,7 @@ fn mkdir_p(path: *const libc::c_char, mode: u32) -> libc::c_int {
             continue;
         }
         let mut e = Buffer::new();
-        e.bytescpy(c);
+        e.bytecpy(c);
         ret = unsafe { libc::mkdirat(dirfd, e.c_str(), mode) };
         if ret == -1 && errno_n() != libc::EEXIST { break; }
         ret = unsafe { libc::openat(dirfd, e.c_str(), libc::O_PATH, 0) };
@@ -223,7 +223,7 @@ fn do_install(argv0: *const libc::c_char, arg: *const libc::c_char) -> i32 {
     if exe.is_empty() {
         fdprint!(STDERR_FILENO, "Cannot read /proc/self/exe (", errno_s(),
                  "), falling back to ", argv0, "\n");
-        exe.bytescpy(slice_from_c_str(argv0));
+        exe.bytecpy(slice_from_c_str(argv0));
     }
     let mut absexe = Buffer::new();
     absexe.reserve(libc::PATH_MAX as usize);
