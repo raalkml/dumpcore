@@ -77,6 +77,22 @@ fn verify_config() {
     dump_syntax();
 }
 
+#[test]
+fn check_redirect_fd() {
+    extern crate libc;
+    use libc::{STDIN_FILENO, STDOUT_FILENO, STDERR_FILENO};
+    let core_file = Buffer::from_str("__redirect_fd_test__\0discard");
+    let fd = unsafe {
+        libc::open(b"/dev/null\0".as_ptr() as *const libc::c_char, libc::O_WRONLY)
+    };
+    assert!(fd != -1);
+    let fname = redirect_fd(fd, core_file.bytez(), ".tmp");
+    assert!(&fname[..25] == b"__redirect_fd_test__.tmp\0");
+    let ret = unsafe { libc::unlink(fname.c_str()) };
+    assert!(ret == 0);
+    unsafe { libc::close(fd) };
+}
+
 //
 // An example of how to implement interpolated formatting without std
 //

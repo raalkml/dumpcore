@@ -60,14 +60,13 @@ fn no_stdio_fd(fd: libc::c_int) -> libc::c_int {
     fd
 }
 
-fn redirect_fd(dst: libc::c_int, prefix: &[u8], suffix: &'static str) -> Buffer {
+fn redirect_fd(dst: libc::c_int, prefix: &[u8], suffix: &str) -> Buffer {
     assert!(prefix.len() > 0);
     let mut name = Buffer::new();
     name.reserve(prefix.len() + suffix.len() + 1);
-    let pfxlen = prefix.len() - 1;
-    name[..pfxlen].copy_from_slice(&prefix[..pfxlen]);
-    name[pfxlen..pfxlen + suffix.len()].copy_from_slice(suffix.as_bytes());
-    name[pfxlen + suffix.len()] = 0;
+    name.bytecpy(prefix);
+    name[prefix.len() .. prefix.len() + suffix.len()].copy_from_slice(suffix.as_bytes());
+    name[prefix.len() + suffix.len()] = 0;
     let fd = unsafe {
         libc::open(name.c_str(), libc::O_WRONLY | libc::O_APPEND | libc::O_CREAT, 0o640)
     };
@@ -597,8 +596,8 @@ pub extern "C" fn main(argc: i32, argv: *const *const i8) -> i32 {
     };
     let core_fd = no_stdio_fd(unsafe { libc::mkstemp(core_file.c_str_mut()) });
 
-    redirect_fd(STDERR_FILENO, &core_file[..], ".log");
-    redirect_fd(STDOUT_FILENO, &core_file[..], ".txt");
+    redirect_fd(STDERR_FILENO, core_file.bytez(), ".log");
+    redirect_fd(STDOUT_FILENO, core_file.bytez(), ".txt");
 
     if core_fd == -1 {
         fdprint!(STDERR_FILENO, core_file[..], ": tmp core file: open failed\n");
