@@ -5,6 +5,7 @@ edition = "2015"
 
 [dependencies]
 libc = { version = "0.2", default-features = false }
+buffer = { path = "../lib/rs/libc-buffer" }
 
 [profile.dev]
 panic = "abort"

@@ -7,16 +7,18 @@ extern crate core;
 
 extern crate libc;
 use libc::{STDIN_FILENO, STDOUT_FILENO, STDERR_FILENO};
+
+extern crate buffer;
+use buffer::Buffer;
+
 use core::iter;
 mod misc;
-mod buffer;
 mod config;
 mod fdprint;
 #[cfg(test)]
 mod unitests;
 
 use misc::*;
-use buffer::Buffer;
 use config::load_config;
 
 static DUMPCORE_CONFIG: &str = "/etc/dumpcore/config";

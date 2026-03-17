@@ -3,9 +3,17 @@
 version = 4
 
 [[package]]
+name = "buffer"
+version = "0.1.0"
+dependencies = [
+ "libc",
+]
+
+[[package]]
 name = "dumpcore"
 version = "0.1.0"
 dependencies = [
+ "buffer",
  "libc",
 ]
 
