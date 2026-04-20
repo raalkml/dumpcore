@@ -81,7 +81,7 @@ fn redirect_fd(dst: libc::c_int, prefix: &[u8], suffix: &str) -> Buffer {
 }
 
 impl Core {
-    fn open_pid(&mut self, pid_arg: *const i8) {
+    fn open_pid(&mut self, pid_arg: *const libc::c_char) {
         let pid_arg = slice_from_c_str(pid_arg);
         let mut path = [0u8; 6 + 10 + 1];
         path[..6].copy_from_slice(b"/proc/");
@@ -308,7 +308,7 @@ fn do_install(argv0: *const libc::c_char, arg: *const libc::c_char) -> i32 {
     let limit = if unsafe { *arg } == 0 {
         b"100"
     } else {
-        slice_from_c_str(if unsafe { *arg } == b'=' as i8 { unsafe { arg.add(1) } }
+        slice_from_c_str(if unsafe { *arg } == b'=' as libc::c_char { unsafe { arg.add(1) } }
                          else { arg })
     };
     let err = write_file(libc::AT_FDCWD, CORE_PIPE_LIMIT.as_ptr() as *const libc::c_char, limit);
@@ -335,7 +335,7 @@ fn dump_proc(proc_pid_fd: libc::c_int) {
                 let ent = unsafe { libc::readdir(dir) };
                 if ent.is_null() { break; }
                 let ent = unsafe { ent.read() };
-                if ent.d_name[0] == '.' as i8 { continue; }
+                if ent.d_name[0] == '.' as libc::c_char { continue; }
                 let t = read_symlink(dfd, ent.d_name.as_ptr());
                 fdprint!(STDOUT_FILENO, " fd/", ent.d_name.as_ptr(), " -> ", t.bytez(), "\n");
             }
@@ -543,7 +543,7 @@ fn trace_pid(core: &Core) {
 //  /../dumpcore <core-pid> <core-pidns-pid> <uid> <signal> <exe-path-/-!>
 //
 #[unsafe(no_mangle)]
-pub extern "C" fn main(argc: i32, argv: *const *const i8) -> i32 {
+pub extern "C" fn main(argc: i32, argv: *const *const libc::c_char) -> i32 {
 #[cfg(test)]
     { unit_test_main(); return 0; }
 
