@@ -1,9 +1,19 @@
-use core::{ptr, slice};
+//
+// A buffer structure which uses libc heap allocator and data manipulation routines
+//
+#![cfg_attr(not(test), no_std)]
+#[cfg(test)]
+extern crate core;
+#[cfg(test)]
+mod unitests;
 
 pub struct Buffer {
     ptr: *mut libc::c_void,
     len: usize,
 }
+
+use core::{ptr, slice};
+use core::mem::size_of;
 
 impl Buffer {
     #![allow(unused)]
@@ -144,4 +154,5 @@ impl core::ops::IndexMut<usize> for Buffer {
         else { panic!("index out-of-bounds") }
     }
 }
+
 

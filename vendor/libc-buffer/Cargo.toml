@@ -1,11 +1,10 @@
 [package]
-name = "dumpcore"
+name = "buffer"
 version = "0.1.0"
 edition = "2015"
 
 [dependencies]
 libc = { version = "0.2", default-features = false }
-buffer = { path = "vendor/libc-buffer" }
 
 [profile.dev]
 panic = "abort"
@@ -15,7 +14,6 @@ lto = true
 
 [profile.release]
 panic = "abort"   # Abort on panic (removes stack unwinding code)
-lto = true        # Link Time Optimization
 opt-level = "z"   # Optimize for size.
 strip = true      # Strip debug symbols from the binary.
 codegen-units = 1 # Reduce number of codegen units to increase optimizations.
