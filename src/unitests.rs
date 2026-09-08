@@ -2,12 +2,6 @@ use super::*;
 use Buffer;
 
 #[test]
-fn verify_std() {
-    let a = vec!{1, 2, 3};
-    assert_eq!(a, &[1,2,3]);
-}
-
-#[test]
 fn verify_utoa() {
     let mut b = [ 0u8; 10 ];
     let s = misc::u32toa(1234, &mut b);
@@ -69,51 +63,4 @@ fn check_redirect_fd() {
     assert!(ret == 0);
     unsafe { libc::close(fd) };
 }
-
-//
-// An example of how to implement interpolated formatting without std
-//
-#[test]
-fn dosomething() {
-    struct Aaa { i: isize }
-    impl Aaa {
-        fn aaa(&self) -> isize { return self.i }
-    }
-    impl core::fmt::Display for Aaa {
-        fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-            write!(f, "Aaa{{i:{}}}", self.i)
-        }
-    }
-    let aaa = &Aaa{ i: 90 };
-    struct FdWriter {
-        fd : libc::c_int,
-        c : u32
-    }
-    impl core::fmt::Write for FdWriter {
-        fn write_str(&mut self, s: &str) -> core::fmt::Result {
-            fdprint!(self.fd, "\"", s, "\"\n");
-            self.c += 1;
-            Ok(())
-        }
-    }
-    struct Writer {}
-    impl Writer {
-        fn write_fmt(&mut self, args: core::fmt::Arguments<'_>) -> Result<(), core::fmt::Error> {
-            if let Some(a) = args.as_str() {
-                fdprint!(STDERR_FILENO, "'", a, "'");
-                return Ok(());
-            }
-            let mut wr = FdWriter { fd: STDERR_FILENO, c:0 };
-            let _ = core::fmt::write(&mut wr, args);
-            Err(core::fmt::Error)
-        }
-    }
-    let constant = 123456789;
-    let mut o = Writer {};
-    let _ = write!(o, "Begin {} end", "CONST");
-    let _ = write!(o, "begin {} {constant} {} end {}.", "CONST", aaa.aaa(), 2);
-
-    fdprint!(STDERR_FILENO, "\n");
-}
-
 

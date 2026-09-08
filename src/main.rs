@@ -1,7 +1,6 @@
-#![no_main]
+#![cfg_attr(not(test), no_main)]
 #![cfg_attr(not(test), no_std)]
 #![cfg_attr(test, allow(unused))]
-#![reexport_test_harness_main = "unit_test_main"]
 #[cfg(test)]
 extern crate core;
 
@@ -15,11 +14,12 @@ use core::iter;
 mod misc;
 mod config;
 mod fdprint;
-#[cfg(test)]
-mod unitests;
 
 use misc::*;
 use config::load_config;
+
+#[cfg(test)]
+mod unitests;
 
 static DUMPCORE_CONFIG: &str = "/etc/dumpcore/config";
 
@@ -542,10 +542,9 @@ fn trace_pid(core: &Core) {
 //
 //  /../dumpcore <core-pid> <core-pidns-pid> <uid> <signal> <exe-path-/-!>
 //
+#[cfg(not(test))]
 #[unsafe(no_mangle)]
 pub extern "C" fn main(argc: i32, argv: *const *const libc::c_char) -> i32 {
-#[cfg(test)]
-    { unit_test_main(); return 0; }
 
     if argc == 2 && slice_from_c_str(unsafe {*argv.add(1)}).starts_with(b"--install") {
         return do_install(unsafe { *argv }, unsafe { (*argv.add(1)).add(9) });
@@ -678,4 +677,3 @@ fn my_panic(info: &core::panic::PanicInfo) -> ! {
     unsafe { libc::raise(libc::SIGKILL); }
     loop {}
 }
-
