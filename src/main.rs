@@ -611,10 +611,10 @@ pub extern "C" fn main(argc: i32, argv: *const *const libc::c_char) -> i32 {
     }
 
     fdprint!(STDOUT_FILENO, "CORE-OF: ",
-             if !core.proc_exe.is_empty() {
-                 c_str_of(&core.proc_exe[..])
-             } else {
+             if core.proc_exe.is_empty() {
                  core.exe
+             } else {
+                 c_str_of(&core.proc_exe[..])
              }, "\n\n");
     fdprint!(STDOUT_FILENO, "DUMPCORE_ARGS:\n");
     for i in 1 .. argc as usize {
