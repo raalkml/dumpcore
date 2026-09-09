@@ -130,7 +130,7 @@ pub fn parse_config(configuration: &[u8]) -> Config {
         value: Buffer::new(),
         value_len: 0,
     };
-    for ch in configuration {
+    for ch in core::iter::chain(configuration, b"\n") {
         if parser.state == Parser::COMMENT || parser.state == Parser::FAIL {
             if *ch == b'\n' { parser.state = Parser::TEXT; }
             continue;
@@ -245,6 +245,9 @@ fn verify_parse_config() {
 
     // override just one default parameter
     let c = parse_config(b"CORE_DIR=/tmp\n");
+    assert!(c.core_user == def_c.core_user);
+    assert!(slice_from_c_str(c.core_dir) == b"/tmp");
+    let c = parse_config(b"CORE_DIR=/tmp");
     assert!(c.core_user == def_c.core_user);
     assert!(slice_from_c_str(c.core_dir) == b"/tmp");
 
