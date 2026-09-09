@@ -61,6 +61,7 @@ struct Parser {
     value_len: usize,
 }
 
+// Prefix tree of the config syntax strings
 static BOTTOM    : Prefix = Prefix { part: b"#", next: &BOTTOM, down: &BOTTOM };
 static GDB       : Prefix = Prefix { part: b"GDB", next: &BOTTOM, down: &BOTTOM };
 static AUTOCLEAN : Prefix = Prefix { part: b"AUTOCLEAN", next: &BOTTOM, down: &BOTTOM };
@@ -227,3 +228,46 @@ pub fn parse_config(configuration: &[u8]) -> Config {
     }
     config
 }
+
+#[test]
+fn verify_parse_config() {
+    use misc::slice_from_c_str;
+
+    let def_c = Config::default();
+
+    // default config
+    let c = parse_config(b"");
+    assert!(c.core_autoclean == def_c.core_autoclean);
+    assert!(c.core_dir == def_c.core_dir);
+    assert!(c.core_user == def_c.core_user);
+    assert!(c.core_group == def_c.core_group);
+    assert!(c.gdb == def_c.gdb);
+
+    // override just one default parameter
+    let c = parse_config(b"CORE_DIR=/tmp\n");
+    assert!(c.core_user == def_c.core_user);
+    assert!(slice_from_c_str(c.core_dir) == b"/tmp");
+
+    // invalid value for a string parameter
+    let c = parse_config(b"CORE_DIR");
+    assert!(c.core_dir == def_c.core_dir);
+    let c = parse_config(br"
+CORE_DIR
+");
+    assert!(c.core_dir == def_c.core_dir);
+
+    static CONFIG1 : &[u8] = br"
+CORE_DIR=/var/log/cores
+CORE_USER=root
+CORE_GROUP=debug
+GDB=/usr/bin/gdb
+CORE_AUTOCLEAN=YES
+";
+    let c = parse_config(CONFIG1);
+    assert!(c.core_autoclean == true);
+    assert!(slice_from_c_str(c.core_user) == b"root");
+    assert!(slice_from_c_str(c.core_group) == b"debug");
+    assert!(slice_from_c_str(c.core_dir) == b"/var/log/cores");
+    assert!(slice_from_c_str(c.gdb) == b"/usr/bin/gdb");
+}
+
